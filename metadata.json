@@ -1,0 +1,6 @@
+{
+  "name": "BloxEx — Roblox Cloud Manager",
+  "description": "Enterprise-grade dashboard for bulk managing Roblox gamepasses, prices, and sale status using official Cloud APIs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

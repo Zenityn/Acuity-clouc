@@ -1,11 +1,39 @@
-<div align="center">
+# BloxEx — Roblox Gamepass Manager
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Web dashboard for managing Roblox gamepasses in bulk. No executor needed — runs as a Node.js server.
 
-  <h1>Built with AI Studio</h2>
+## Setup
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+```bash
+npm install
+cp .env.example .env
+# Edit .env and set your ROBLOX_API_KEY
+npm run dev
+```
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+Open http://localhost:3000
 
-</div>
+## .env
+```
+ROBLOX_API_KEY=your_api_key_here
+```
+
+## Features
+- Import existing gamepasses by base name + universe ID
+- Create lots in bulk (rate-limited to 5 req/s)
+- Set price per lot or bulk sync all
+- Toggle on/off sale per lot or per group
+- Audit live prices from Roblox API
+- Group management in the Manage tab
+
+## icon.jpg
+Place your gamepass icon image as `icon.jpg` in the project root.
+
+## active_lots.json
+Auto-created. Tracks all lots with their ID, baseName, num, and universeId.
+To add existing passes manually:
+```bash
+curl -X POST http://localhost:3000/register \
+  -H "Content-Type: application/json" \
+  -d '{"baseName":"CATI","universeId":"2705625021","ids":["id1","id2"]}'
+```
