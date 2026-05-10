@@ -95,7 +95,7 @@ async function startServer() {
 
   // CREATE: New gamepass
   app.post("/api/create_gamepass", upload.single('imageFile'), async (req, res) => {
-    const { name, description, price, isForSale, universeId, apiKey } = req.body;
+    const { name, description, price, isForSale, universeId, apiKey, baseName } = req.body;
     const file = req.file;
 
     if (!name || !universeId || !apiKey || !file) {
@@ -130,7 +130,7 @@ async function startServer() {
       const existing = loadLots();
       const newLot = {
         id: String(data.gamePassId),
-        baseName: "Created",
+        baseName: baseName || "Inventory",
         num: existing.length + 1,
         universeId: universeId,
         name: name,
@@ -177,15 +177,17 @@ async function startServer() {
     res.json({ status: "success", audited: results.length });
   });
 
-  // PATCH: Update price/sale status
-  app.post("/set_price", async (req, res) => {
-    const { id, universeId, apiKey, price, forSale } = req.body;
+  // PATCH: Update asset details (name, group, price, sale status)
+  app.post("/update_asset", async (req, res) => {
+    const { id, universeId, apiKey, name, baseName, price, forSale, description } = req.body;
     if (!id || !universeId || !apiKey) return res.status(400).json({ error: "Missing info" });
 
     try {
       const url = `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes/${id}`;
       
       const form = new FormData();
+      if (name !== undefined) form.append("name", String(name));
+      if (baseName !== undefined) form.append("description", `[Group: ${baseName}] ${description || ""}`); // Optional: track group in description if needed, or just update local cache
       if (price !== undefined) form.append("price", String(price));
       if (forSale !== undefined) form.append("isForSale", String(forSale));
 
@@ -204,6 +206,8 @@ async function startServer() {
       const lots = loadLots();
       const idx = lots.findIndex(l => l.id === id);
       if (idx !== -1) {
+        if (name !== undefined) lots[idx].name = name;
+        if (baseName !== undefined) lots[idx].baseName = baseName;
         if (price !== undefined) lots[idx].price = price;
         if (forSale !== undefined) lots[idx].isForSale = forSale;
         saveLots(lots);
