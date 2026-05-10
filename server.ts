@@ -270,6 +270,42 @@ async function startServer() {
     res.json({ status: "success", count: success });
   });
 
+  // BULK SHUTDOWN
+  app.post("/bulk_shutdown", async (req, res) => {
+    const { universeId, apiKey, ids } = req.body;
+    if (!universeId || !apiKey || !ids || !Array.isArray(ids)) {
+      return res.status(400).json({ error: "Missing required information" });
+    }
+
+    let success = 0;
+    for (const id of ids) {
+      try {
+        const url = `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes/${id}`;
+        const form = new FormData();
+        form.append("isForSale", "false");
+
+        const r = await fetch(url, {
+          method: "PATCH",
+          headers: { ...getHeaders(apiKey), ...form.getHeaders() },
+          body: form
+        });
+
+        if (r.ok) success++;
+        // Small delay to avoid rate limits
+        await new Promise(r => setTimeout(r, 150));
+      } catch (e) {
+        console.error(`Shutdown failed for ${id}:`, e);
+      }
+    }
+
+    const all = loadLots();
+    const idSet = new Set(ids);
+    const updated = all.map(l => idSet.has(l.id) ? { ...l, isForSale: false } : l);
+    saveLots(updated);
+
+    res.json({ status: "success", count: success });
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
