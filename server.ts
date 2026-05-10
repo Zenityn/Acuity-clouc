@@ -36,6 +36,12 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Logging middleware
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path}`);
+    next();
+  });
+
   // ─── Roblox API Proxy Helpers ──────────────────────────────────────────────
 
   const getHeaders = (apiKey: string) => ({
@@ -48,12 +54,12 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
-  app.get("/get_ids", (req, res) => {
+  app.get("/api/get_ids", (req, res) => {
     res.json({ lots: loadLots() });
   });
 
   // LIST: Get all gamepasses from Roblox
-  app.post("/import_existing", async (req, res) => {
+  app.post("/api/import_existing", async (req, res) => {
     const { filterName, universeId, apiKey } = req.body;
     if (!universeId || !apiKey) return res.status(400).json({ error: "Missing credentials" });
 
@@ -159,7 +165,7 @@ async function startServer() {
   });
 
   // GET: Audit prices for universe
-  app.post("/check_prices", async (req, res) => {
+  app.post("/api/check_prices", async (req, res) => {
     const { universeId, apiKey } = req.body;
     const lots = loadLots().filter(l => l.universeId === universeId);
     
@@ -190,7 +196,7 @@ async function startServer() {
   });
 
   // PATCH: Update asset details (name, group, price, sale status)
-  app.post("/update_asset", async (req, res) => {
+  app.post("/api/update_asset", async (req, res) => {
     const { id, universeId, apiKey, name, baseName, price, forSale, description } = req.body;
     if (!id || !universeId || !apiKey) return res.status(400).json({ error: "Missing info" });
 
@@ -235,7 +241,7 @@ async function startServer() {
   });
 
   // BULK SYNC
-  app.post("/sync", async (req, res) => {
+  app.post("/api/sync", async (req, res) => {
     const { universeId, apiKey, price } = req.body;
     const lots = loadLots().filter(l => l.universeId === universeId);
     
