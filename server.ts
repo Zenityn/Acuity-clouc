@@ -30,13 +30,12 @@ function saveLots(lots: any[]) {
   fs.writeFileSync(LOTS_FILE, JSON.stringify(lots, null, 2));
 }
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+export const app = express();
+const PORT = 3000;
 
-  app.use(express.json());
+app.use(express.json());
 
-  // ─── Roblox API Proxy Helpers ──────────────────────────────────────────────
+// ─── Roblox API Proxy Helpers ──────────────────────────────────────────────
 
   const getHeaders = (apiKey: string) => ({
     "x-api-key": apiKey,
@@ -58,7 +57,7 @@ async function startServer() {
     if (!universeId || !apiKey) return res.status(400).json({ error: "Missing credentials" });
 
     try {
-      const url = `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes/creator`;
+      const url = `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes`;
       const response = await fetch(url, { headers: getHeaders(apiKey) });
       const data: any = await response.json();
 
@@ -172,7 +171,7 @@ async function startServer() {
     const results = [];
     for (const lot of lots) {
       try {
-        const url = `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes/${lot.id}/creator`;
+        const url = `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes/${lot.id}`;
         const r = await fetch(url, { headers: getHeaders(apiKey) });
         const data: any = await r.json();
         
@@ -306,24 +305,26 @@ async function startServer() {
     res.json({ status: "success", count: success });
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
+// Vite middleware for development
+if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+  const { createServer: createViteServer } = await import("vite");
+  const vite = await createViteServer({
+    server: { middlewareMode: true },
+    appType: "spa",
+  });
+  app.use(vite.middlewares);
+} else if (!process.env.VERCEL) {
+  const distPath = path.join(process.cwd(), 'dist');
+  app.use(express.static(distPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
 
+if (!process.env.VERCEL) {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
-startServer();
+export default app;

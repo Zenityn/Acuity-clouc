@@ -166,19 +166,22 @@ export default function App() {
 
   const createGamePass = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!apiKey || !universeId) return notify("Set credentials in Settings", "err");
+    const cleanKey = apiKey.trim();
+    const cleanUniv = universeId.trim();
+
+    if (!cleanKey || !cleanUniv) return notify("Set credentials in Settings", "err");
     if (!newIcon) return notify("Please select an icon image", "err");
     
     setIsLoading(true);
     try {
       const fd = new FormData();
-      fd.append('name', newName || "Stock Share #1");
-      fd.append('description', newDesc || "Acuity.sys Automated Lot");
+      fd.append('name', newName.trim() || "Stock Share #1");
+      fd.append('description', newDesc.trim() || "Created via BloxEx Cloud Manager");
       fd.append('price', newPrice);
       fd.append('isForSale', String(newIsForSale));
       fd.append('imageFile', newIcon);
-      fd.append('universeId', universeId);
-      fd.append('apiKey', apiKey);
+      fd.append('universeId', cleanUniv);
+      fd.append('apiKey', cleanKey);
       fd.append('baseName', 'Inventory');
 
       const r = await fetch('/api/create_gamepass', {
@@ -485,7 +488,7 @@ export default function App() {
                     <input 
                       type="password" 
                       value={apiKey} 
-                      onChange={e => setApiKey(e.target.value)}
+                      onChange={e => setApiKey(e.target.value.trim())}
                       placeholder="Place your Roblox API Key here..." 
                       className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl py-3 pl-12 pr-4 outline-none focus:border-black dark:focus:border-white transition-all text-sm font-mono"
                     />
@@ -554,7 +557,7 @@ export default function App() {
                     <input 
                       type="text" 
                       value={universeId} 
-                      onChange={e => setUniverseId(e.target.value)}
+                      onChange={e => setUniverseId(e.target.value.trim())}
                       placeholder="e.g. 27056..." 
                       className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl py-3 pl-12 pr-4 outline-none focus:border-black dark:focus:border-white transition-all text-sm font-mono"
                     />
