@@ -1,6 +1,6 @@
 import fetch from "node-fetch";
 import FormData from "form-data";
-import { loadLots, saveLots, getRobloxHeaders } from "../src/lib/server-utils";
+import { loadLots, saveLots, getRobloxHeaders } from "../src/lib/server-utils.ts";
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {

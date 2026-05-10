@@ -1,4 +1,4 @@
-import { loadLots } from "../src/lib/server-utils";
+import { loadLots } from "../src/lib/server-utils.ts";
 
 export default function handler(req: any, res: any) {
   if (req.method !== 'GET') {

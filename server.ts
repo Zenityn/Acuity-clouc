@@ -3,18 +3,24 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 
 // Import handlers
-import get_ids_handler from "./api/get_ids";
-import import_existing_handler from "./api/import_existing";
-import update_asset_handler from "./api/update_asset";
-import sync_handler from "./api/sync";
-import bulk_shutdown_handler from "./api/bulk_shutdown";
-import check_prices_handler from "./api/check_prices";
-import create_gamepass_handler from "./api/create_gamepass";
-import ping_handler from "./api/ping";
+import get_ids_handler from "./api/get_ids.ts";
+import import_existing_handler from "./api/import_existing.ts";
+import update_asset_handler from "./api/update_asset.ts";
+import sync_handler from "./api/sync.ts";
+import bulk_shutdown_handler from "./api/bulk_shutdown.ts";
+import check_prices_handler from "./api/check_prices.ts";
+import create_gamepass_handler from "./api/create_gamepass.ts";
+import ping_handler from "./api/ping.ts";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Logging Middleware
+  app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+    next();
+  });
 
   // Middleware
   app.use((req, res, next) => {
@@ -38,6 +44,12 @@ async function startServer() {
   
   // Multipart handle for creation
   app.post("/api/create_gamepass", create_gamepass_handler);
+
+  // API 404 handler
+  app.use('/api', (req, res) => {
+    console.error(`[API 404] ${req.method} ${req.path}`);
+    res.status(404).json({ error: "API Route not found" });
+  });
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
