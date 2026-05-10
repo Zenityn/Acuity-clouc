@@ -3,8 +3,7 @@ import {
   Shield, Settings, RefreshCw, Power, 
   Search, AlertTriangle, Hexagon, Copy, HelpCircle,
   Zap, LayoutGrid, Key, Globe, Layout, Package, CheckCircle2,
-  Moon, Sun, Monitor, ChevronDown, ChevronRight,
-  SortAsc, SortDesc, List, Grid3X3, Maximize2
+  Moon, Sun, Monitor
 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 
@@ -46,7 +45,6 @@ export default function App() {
   const [showApiKeyGuide, setShowApiKeyGuide] = useState(false);
   const [showUniverseIdGuide, setShowUniverseIdGuide] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark' | 'almond' | 'system'>(() => (localStorage.getItem('theme') as 'light' | 'dark' | 'almond' | 'system') || 'system');
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   // Theme Logic
   useEffect(() => {
@@ -79,15 +77,6 @@ export default function App() {
 
   // Filter State
   const [filterGroup, setFilterGroup] = useState<string>('All');
-  const [filterSaleStatus, setFilterSaleStatus] = useState<'All' | 'OnSale' | 'OffSale'>('All');
-  
-  // Sort State
-  const [sortBy, setSortBy] = useState<'name' | 'price'>('name');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-
-  // View State
-  const [viewLayout, setViewLayout] = useState<'detailed' | 'compact' | 'grid'>('detailed');
-  const [expandedGridId, setExpandedGridId] = useState<string | null>(null);
 
   const notify = useCallback((msg: string, type: 'ok' | 'err') => {
     setToast({ msg, type });
@@ -112,7 +101,7 @@ export default function App() {
 
   const fetchLots = async () => {
     try {
-      const r = await fetch('/api/get_ids');
+      const r = await fetch('/get_ids');
       const data = await r.json();
       setLots(data.lots || []);
     } catch (e) {
@@ -124,14 +113,14 @@ export default function App() {
     if (!apiKey || !universeId) return notify("Set API Key & Universe ID in Settings first", "err");
     setIsLoading(true);
     try {
-      const r = await fetch('/api/check_prices', {
+      const r = await fetch('/check_prices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey, universeId })
       });
       const data = await r.json();
       if (data.status === 'success') {
-        notify(`Audit complete for Univ ${universeId}: ${data.audited} assets checked`, 'ok');
+        notify(`Audit complete: ${data.audited} assets checked`, 'ok');
       }
       await fetchLots();
     } catch (e) {
@@ -145,14 +134,14 @@ export default function App() {
     if (!apiKey || !universeId) return notify("Set credentials in Settings", "err");
     setIsLoading(true);
     try {
-      const r = await fetch('/api/import_existing', {
+      const r = await fetch('/import_existing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey, universeId, filterName })
       });
       const d = await r.json();
       if (d.status === 'success') {
-        notify(`Import scan complete for Univ ${universeId}. Found ${d.count} new assets.`, 'ok');
+        notify(`Import scan complete. Found ${d.count} new assets.`, 'ok');
         await fetchLots();
       } else {
         notify(d.message || "Import failed", "err");
@@ -195,7 +184,7 @@ export default function App() {
       }
       
       if (r.ok && d.status === 'success') {
-        notify(`Gamepass created in Univ ${universeId}!`, "ok");
+        notify("Gamepass created successfully!", "ok");
         setNewName('');
         setNewDesc('');
         setNewIcon(null);
@@ -216,16 +205,16 @@ export default function App() {
 
   const bulkSync = async () => {
     if (!apiKey || !universeId) return notify("Set credentials first", "err");
-    if (!confirm(`Sync ALL tracked assets for Universe ${universeId} to ${globalPrice} Robux?`)) return;
+    if (!confirm(`Sync ALL tracked assets in this universe to ${globalPrice} Robux?`)) return;
     setIsLoading(true);
     try {
-      const r = await fetch('/api/sync', {
+      const r = await fetch('/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey, universeId, price: Number(globalPrice) })
       });
       const d = await r.json();
-      notify(`Synced ${d.count} assets in Univ ${universeId} to ${globalPrice} R$`, 'ok');
+      notify(`Synced ${d.count} assets to ${globalPrice} R$`, 'ok');
       await fetchLots();
     } finally {
       setIsLoading(false);
@@ -233,16 +222,13 @@ export default function App() {
   };
 
   const updateAsset = async (id: string, updates: Partial<Lot>) => {
-    const asset = lots.find(l => l.id === id);
-    const targetUniverseId = asset?.universeId || universeId;
-
     try {
-      const r = await fetch('/api/update_asset', {
+      const r = await fetch('/update_asset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
             id, 
-            universeId: targetUniverseId, 
+            universeId, 
             apiKey, 
             name: updates.name,
             baseName: updates.baseName,
@@ -290,60 +276,13 @@ export default function App() {
     cancelEditing();
   };
 
-  const emergencyShutdown = async () => {
-    const matchedIds = (Object.values(groupedLots) as Lot[][]).flat().map(l => l.id);
-    if (matchedIds.length === 0) return notify("No assets match current filters", "err");
-    
-    if (!confirm(`EMERGENCY: Pull ${matchedIds.length} matched assets off-sale?`)) return;
-    
-    setIsLoading(true);
-    try {
-      const r = await fetch('/api/bulk_shutdown', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          apiKey, 
-          universeId, 
-          ids: matchedIds 
-        })
-      });
-      const d = await r.json();
-      if (d.status === 'success') {
-        notify(`Shutdown complete: ${d.count} assets set off-sale`, 'ok');
-      } else {
-        notify(d.message || "Shutdown failed", "err");
-      }
-      await fetchLots();
-    } catch (e) {
-      notify("Network error during shutdown", "err");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const groupedLots = useMemo(() => {
-    let filtered = lots.filter(l => {
+    const filtered = lots.filter(l => {
+        const matchesUniverse = l.universeId === universeId;
         const matchesFilter = filterName ? (l.name || '').toLowerCase().includes(filterName.toLowerCase()) : true;
         const group = l.baseName || 'Inventory';
         const matchesGroup = filterGroup === 'All' || group === filterGroup;
-        
-        const matchesSaleStatus = filterSaleStatus === 'All' 
-            ? true 
-            : filterSaleStatus === 'OnSale' 
-                ? l.isForSale 
-                : !l.isForSale;
-
-        return matchesFilter && matchesGroup && matchesSaleStatus;
-    });
-
-    // Apply Sorting
-    filtered = [...filtered].sort((a, b) => {
-        let valA: any = sortBy === 'name' ? (a.name || '').toLowerCase() : a.price;
-        let valB: any = sortBy === 'name' ? (b.name || '').toLowerCase() : b.price;
-
-        if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
-        if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
-        return 0;
+        return matchesUniverse && matchesFilter && matchesGroup;
     });
 
     const groups: { [key: string]: Lot[] } = {};
@@ -353,19 +292,15 @@ export default function App() {
         groups[group].push(lot);
     });
     return groups;
-  }, [lots, filterName, filterGroup, filterSaleStatus, sortBy, sortOrder]);
+  }, [lots, filterName, filterGroup, universeId]);
 
   const availableGroups = useMemo(() => {
     const sets = new Set<string>();
-    lots.forEach(l => {
+    lots.filter(l => l.universeId === universeId).forEach(l => {
         sets.add(l.baseName || 'Inventory');
     });
     return ['All', ...Array.from(sets)];
-  }, [lots]);
-
-  const toggleGroup = (group: string) => {
-    setCollapsedGroups(prev => ({ ...prev, [group]: !prev[group] }));
-  };
+  }, [lots, universeId]);
 
   return (
     <div className="min-h-screen bg-[#f9fafb] dark:bg-[#0a0a0a] text-gray-900 dark:text-gray-100 font-sans selection:bg-black selection:text-white pb-32">
@@ -593,18 +528,6 @@ export default function App() {
                             />
                         </div>
                         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-                            <Zap size={12} className="text-gray-400 shrink-0" />
-                            {(['All', 'OnSale', 'OffSale'] as const).map(s => (
-                                <button
-                                    key={s}
-                                    onClick={() => setFilterSaleStatus(s)}
-                                    className={`px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition-all border ${filterSaleStatus === s ? 'bg-black dark:bg-white text-white dark:text-black border-transparent' : 'bg-gray-100 dark:bg-white/5 text-gray-400 border-gray-200 dark:border-white/10'}`}
-                                >
-                                    {s === 'OnSale' ? 'On Sale' : s === 'OffSale' ? 'Off Sale' : 'All Status'}
-                                </button>
-                            ))}
-                        </div>
-                        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 border-t border-gray-100 dark:border-white/5 pt-1">
                             <LayoutGrid size={12} className="text-gray-400 shrink-0" />
                             {availableGroups.map(g => (
                                 <button
@@ -664,11 +587,14 @@ export default function App() {
                     <p className="text-xs text-red-500/60 mb-4 font-medium leading-relaxed">Instantly disable selected assets on the market in case of emergency.</p>
                   </div>
                   <button 
-                    onClick={emergencyShutdown}
-                    disabled={isLoading}
-                    className="w-full bg-red-600 text-white py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-red-700 active:scale-95 transition-all shadow-lg shadow-red-500/20 disabled:opacity-50"
+                    onClick={() => {
+                        if(confirm("EMERGENCY: Pull ALL matched assets off-sale?")) {
+                            notify("Emergency shutdown triggered", "ok");
+                        }
+                    }}
+                    className="w-full bg-red-600 text-white py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-red-700 active:scale-95 transition-all shadow-lg shadow-red-500/20"
                   >
-                    <Power size={14} className={isLoading ? 'animate-spin' : ''} />
+                    <Power size={14} />
                     EMERGENCY SHUTDOWN
                   </button>
                 </div>
@@ -676,566 +602,295 @@ export default function App() {
 
               {/* Main Table */}
               <div className="bg-white dark:bg-[#0c0c0c] rounded-3xl overflow-hidden border border-gray-200 dark:border-white/10 shadow-sm transition-all duration-300">
-                <div className="px-6 py-6 border-b border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-white/[0.01]">
-                  <div className="flex flex-col lg:flex-row items-center justify-between gap-6 mb-4">
-                    <div className="flex flex-col gap-1 w-full lg:w-auto">
-                      <h3 className="text-sm font-bold flex items-center gap-2">
-                        <LayoutGrid size={16} /> Asset Monitor 
-                        <span className="text-[10px] text-gray-400 font-normal ml-2 tracking-widest uppercase">{Object.values(groupedLots).flat().length} Results</span>
-                      </h3>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
-                      <div className="flex bg-white dark:bg-white/5 p-1 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
-                        <button 
-                          onClick={() => setViewLayout('detailed')}
-                          className={`p-2 rounded-lg transition-all flex items-center gap-2 text-[10px] font-bold ${viewLayout === 'detailed' ? 'bg-gray-100 dark:bg-white/10 text-black dark:text-white shadow-inner' : 'text-gray-400 hover:text-gray-600'}`}
-                        >
-                          <Layout size={14} /> <span className="hidden sm:inline">Detailed</span>
-                        </button>
-                        <button 
-                          onClick={() => setViewLayout('compact')}
-                          className={`p-2 rounded-lg transition-all flex items-center gap-2 text-[10px] font-bold ${viewLayout === 'compact' ? 'bg-gray-100 dark:bg-white/10 text-black dark:text-white shadow-inner' : 'text-gray-400 hover:text-gray-600'}`}
-                        >
-                          <List size={14} /> <span className="hidden sm:inline">Compact</span>
-                        </button>
-                        <button 
-                          onClick={() => setViewLayout('grid')}
-                          className={`p-2 rounded-lg transition-all flex items-center gap-2 text-[10px] font-bold ${viewLayout === 'grid' ? 'bg-gray-100 dark:bg-white/10 text-black dark:text-white shadow-inner' : 'text-gray-400 hover:text-gray-600'}`}
-                        >
-                          <Grid3X3 size={14} /> <span className="hidden sm:inline">Grid</span>
-                        </button>
-                      </div>
-
-                      <div className="h-6 w-px bg-gray-200 dark:bg-white/10 hidden sm:block" />
-
-                      <div className="flex items-center gap-2 bg-white dark:bg-white/5 p-1 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
-                        <div className="flex items-center px-2">
-                          <select 
-                            value={sortBy}
-                            onChange={(e) => setSortBy(e.target.value as 'name' | 'price')}
-                            className="bg-transparent text-[10px] font-bold uppercase tracking-widest text-gray-500 outline-none cursor-pointer appearance-none pr-1"
-                          >
-                            <option value="name">Name</option>
-                            <option value="price">Price</option>
-                          </select>
-                        </div>
-                        <button 
-                          onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-                          className="p-2 bg-gray-50 dark:bg-white/5 rounded-lg text-gray-400 hover:text-black dark:hover:text-white transition-all shadow-sm"
-                        >
-                          {sortOrder === 'asc' ? <SortAsc size={14} /> : <SortDesc size={14} />}
-                        </button>
-                      </div>
-
-                      <button 
-                        onClick={runAudit}
-                        disabled={isLoading}
-                        className="px-4 py-2.5 bg-white dark:bg-white/5 hover:bg-gray-50 dark:hover:bg-white/10 rounded-xl transition-all text-gray-500 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest border border-gray-200 dark:border-white/10 shadow-sm disabled:opacity-50"
-                      >
-                        <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} /> 
-                        <span className="hidden sm:inline">Audit</span>
-                      </button>
-                    </div>
-                  </div>
+                <div className="px-6 py-4 border-b border-gray-100 dark:border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gray-50/50 dark:bg-white/[0.01]">
+                  <h3 className="text-sm font-bold flex items-center gap-2 w-full sm:w-auto">
+                    <LayoutGrid size={16} /> Asset Monitor 
+                    <span className="text-[10px] text-gray-400 font-normal ml-2 tracking-widest uppercase">{Object.values(groupedLots).flat().length} Results</span>
+                  </h3>
+                  <button 
+                    onClick={runAudit}
+                    disabled={isLoading}
+                    className="w-full sm:w-auto px-4 py-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-xl transition-all text-gray-400 flex items-center justify-center gap-2 text-[10px] font-bold border border-gray-200 dark:border-white/10 sm:border-transparent sm:hover:border-gray-200"
+                  >
+                    <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} /> 
+                    REFRESH AUDIT
+                  </button>
                 </div>
 
-                {/* Views */}
-                <AnimatePresence mode="wait">
-                  <motion.div 
-                    key={viewLayout}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.2 }}
-                    className={`${viewLayout === 'grid' ? 'p-6 grid grid-cols-2 lg:grid-cols-4 gap-6' : 'divide-y divide-gray-50 dark:divide-white/5'}`}
-                  >
-                    {(Object.entries(groupedLots) as [string, Lot[]][]).map(([group, assets]) => {
-                      const isCollapsed = collapsedGroups[group];
-                      
-                      if (viewLayout === 'grid') {
-                          return assets.map(lot => {
-                              const isExpanded = expandedGridId === lot.id;
-                              return (
-                                  <motion.div 
-                                      layout
-                                      key={lot.id} 
-                                      onClick={() => setExpandedGridId(isExpanded ? null : lot.id)}
-                                      className={`relative group bg-white dark:bg-white/[0.03] border border-gray-200 dark:border-white/10 rounded-3xl p-4 transition-all hover:shadow-xl ${isExpanded ? 'col-span-2 lg:col-span-2 ring-2 ring-black dark:ring-white z-10' : 'hover:-translate-y-1'} ${lot.universeId !== universeId ? 'opacity-60' : ''}`}
-                                  >
-                                      <div className="flex flex-col gap-3">
-                                          <div className="flex justify-between items-start">
-                                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${lot.isForSale ? 'bg-green-500/10 text-green-500' : 'bg-gray-400/10 text-gray-400'}`}>
-                                                  <Package size={16} />
-                                              </div>
-                                              <div className="flex gap-1">
-                                                  {lot.universeId !== universeId && (
-                                                      <Globe size={10} className="text-orange-500" />
-                                                  )}
-                                                  {lot.isForSale ? (
-                                                      <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" />
-                                                  ) : (
-                                                      <div className="w-2 h-2 rounded-full bg-gray-400" />
-                                                  )}
-                                              </div>
-                                          </div>
-                                        
-                                        <div onClick={(e) => e.stopPropagation()}>
-                                            {(editingId === lot.id && editingField === 'name') ? (
-                                                <input 
-                                                    autoFocus
-                                                    value={editValue}
-                                                    onChange={e => setEditValue(e.target.value)}
-                                                    onBlur={saveEdit}
-                                                    onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
-                                                    className="w-full bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1.5 py-0.5 text-[11px] font-bold outline-none"
-                                                />
-                                            ) : (
-                                                <h4 
-                                                    onClick={() => startEditing(lot.id, 'name', lot.name)}
-                                                    className="text-[11px] font-black text-gray-900 dark:text-gray-100 uppercase tracking-tighter truncate leading-tight mb-1 cursor-text hover:text-blue-500 transition-colors"
-                                                >
-                                                    {lot.name}
-                                                </h4>
-                                            )}
-                                            <div className="text-[8px] font-bold text-gray-400 uppercase tracking-widest truncate">{lot.baseName || 'Inventory'}</div>
-                                        </div>
-
-                                        <div className="flex items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-white/5">
-                                            <div 
-                                                onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'price', lot.price); }}
-                                                className="flex items-center gap-1 cursor-pointer hover:text-blue-500 transition-colors"
-                                            >
-                                                <Hexagon size={10} className="text-gray-400 fill-current opacity-50" />
-                                                {editingId === lot.id && editingField === 'price' ? (
-                                                    <input 
-                                                        autoFocus
-                                                        type="number"
-                                                        value={editValue}
-                                                        onChange={e => setEditValue(e.target.value)}
-                                                        onBlur={saveEdit}
-                                                        onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
-                                                        className="w-16 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-xs font-mono font-bold outline-none"
-                                                    />
-                                                ) : (
-                                                    <span className="text-xs font-mono font-bold leading-none">{lot.price.toLocaleString()}</span>
-                                                )}
-                                            </div>
-                                            <Maximize2 size={12} className={`text-gray-300 group-hover:text-black dark:group-hover:text-white transition-all ${isExpanded ? 'rotate-180' : ''}`} />
-                                        </div>
-
-                                        <AnimatePresence>
-                                            {isExpanded && (
-                                                <motion.div 
-                                                    initial={{ opacity: 0, height: 0 }} 
-                                                    animate={{ opacity: 1, height: 'auto' }} 
-                                                    exit={{ opacity: 0, height: 0 }}
-                                                    transition={{ duration: 0.3, ease: 'circOut' }}
-                                                    className="overflow-hidden"
-                                                >
-                                                    <div className="pt-4 mt-2 border-t border-gray-100 dark:border-white/5 space-y-4">
-                                                        <div className="grid grid-cols-2 gap-4">
-                                                            <div className="space-y-1">
-                                                                <div className="text-[8px] uppercase font-bold text-gray-400 tracking-widest">Asset ID</div>
-                                                                <div className="flex items-center gap-2">
-                                                                    <code className="text-[10px] font-mono text-gray-600 dark:text-gray-400">{lot.id}</code>
-                                                                    <button onClick={(e) => { e.stopPropagation(); copyToClipboard(lot.id); }} className="text-gray-400 hover:text-black dark:hover:text-white">
-                                                                      <Copy size={10} />
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                            <div className="space-y-1">
-                                                                <div className="text-[8px] uppercase font-bold text-gray-400 tracking-widest">Universe</div>
-                                                                <div className="text-[10px] font-mono text-gray-500">{lot.universeId}</div>
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="flex gap-2">
-                                                            <button 
-                                                                onClick={(e) => { e.stopPropagation(); updateAsset(lot.id, { price: Number(globalPrice) }); }}
-                                                                className="flex-1 py-2.5 bg-blue-500 text-white rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 hover:bg-blue-600 transition-all active:scale-95 shadow-lg shadow-blue-500/20"
-                                                            >
-                                                                <RefreshCw size={12} /> Sync Price
-                                                            </button>
-                                                            <button 
-                                                                onClick={(e) => { e.stopPropagation(); updateAsset(lot.id, { isForSale: !lot.isForSale }); }}
-                                                                className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2 transition-all active:scale-95 ${lot.isForSale ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20' : 'bg-green-500/10 text-green-500 hover:bg-green-500/20'}`}
-                                                            >
-                                                                <Power size={12} /> {lot.isForSale ? 'Deactivate' : 'Activate'}
-                                                            </button>
-                                                        </div>
-                                                        
-                                                        <button 
-                                                            onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'name', lot.name); }}
-                                                            className="w-full py-2 bg-gray-100 dark:bg-white/5 rounded-xl text-[9px] font-bold text-gray-400 uppercase tracking-widest hover:bg-gray-200 dark:hover:bg-white/10 hover:text-black dark:hover:text-white transition-all"
-                                                        >
-                                                            Rename Asset
-                                                        </button>
-                                                    </div>
-                                                </motion.div>
-                                            )}
-                                        </AnimatePresence>
-                                    </div>
-                                </motion.div>
-                            );
-                        });
-                    }
-
-                    return (
-                      <div key={group}>
-                        <div 
-                          onClick={() => toggleGroup(group)}
-                          className="px-5 py-3 bg-gray-100/50 dark:bg-white/[0.02] border-b border-gray-200 dark:border-white/5 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 flex items-center justify-between cursor-pointer hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
-                        >
-                          <div className="flex items-center gap-2">
-                             {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                             {group}
-                             <span className="ml-2 text-[8px] font-bold opacity-50">({assets.length})</span>
-                          </div>
-                        </div>
-                        {!isCollapsed && (
-                          <div className="divide-y divide-gray-50 dark:divide-white/5">
-                            {assets.map(lot => (
-                              <div key={lot.id} className={`${viewLayout === 'compact' ? 'p-3 flex items-center justify-between' : 'p-5 space-y-4'} ${lot.universeId !== universeId ? 'opacity-60 bg-gray-50/50 dark:bg-white/[0.01]' : ''}`}>
-                                {viewLayout === 'compact' ? (
-                                    <>
-                                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                                            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${lot.isForSale ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-gray-400'}`} />
-                                            <div className="flex flex-col min-w-0">
-                                                {editingId === lot.id && editingField === 'name' ? (
-                                                    <input 
-                                                        autoFocus
-                                                        value={editValue}
-                                                        onChange={e => setEditValue(e.target.value)}
-                                                        onBlur={saveEdit}
-                                                        onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
-                                                        className="bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-xs font-bold outline-none"
-                                                    />
-                                                ) : (
-                                                    <div 
-                                                        onClick={() => startEditing(lot.id, 'name', lot.name)}
-                                                        className="text-xs font-bold truncate text-gray-900 dark:text-gray-100 cursor-text hover:text-blue-500"
-                                                    >
-                                                        {lot.name}
-                                                    </div>
-                                                )}
-                                                <div className="text-[8px] text-gray-400 uppercase font-black tracking-widest">{lot.id}</div>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-4">
-                                            {editingId === lot.id && editingField === 'price' ? (
-                                                <input 
-                                                    autoFocus
-                                                    type="number"
-                                                    value={editValue}
-                                                    onChange={e => setEditValue(e.target.value)}
-                                                    onBlur={saveEdit}
-                                                    onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
-                                                    className="w-16 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-xs font-mono font-bold outline-none"
-                                                />
-                                            ) : (
-                                                <div 
-                                                    onClick={() => startEditing(lot.id, 'price', lot.price)}
-                                                    className="font-mono text-xs font-bold text-gray-900 dark:text-gray-100 pr-4 cursor-text hover:text-blue-500"
-                                                >
-                                                    {lot.price} R$
-                                                </div>
-                                            )}
-                                            <div className="flex items-center gap-1">
-                                                <button onClick={() => updateAsset(lot.id, { price: Number(globalPrice) })} className="p-1.5 hover:bg-blue-500/10 text-gray-400 hover:text-blue-500 rounded"><RefreshCw size={12} /></button>
-                                                <button onClick={() => updateAsset(lot.id, { isForSale: !lot.isForSale })} className={`p-1.5 rounded transition-all ${lot.isForSale ? 'text-green-500 hover:bg-green-500/10' : 'text-gray-400 hover:bg-gray-100/10'}`}><Power size={12} /></button>
-                                            </div>
-                                        </div>
-                                    </>
-                                ) : (
-                                    <>
-                                        <div className="flex justify-between items-start">
-                                          <div className="flex-1 mr-4">
-                                            {editingId === lot.id && editingField === 'name' ? (
-                                              <input 
-                                                autoFocus
-                                                value={editValue}
-                                                onChange={e => setEditValue(e.target.value)}
-                                                onBlur={saveEdit}
-                                                onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
-                                                className="w-full bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-2 py-1 text-sm font-bold outline-none"
-                                              />
-                                            ) : (
-                                              <div 
-                                                onClick={() => startEditing(lot.id, 'name', lot.name)}
-                                                className="font-bold text-sm text-gray-900 dark:text-gray-100 cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded -ml-1 transition-colors flex items-center gap-1.5 group/name"
-                                              >
-                                                {lot.name}
-                                                <Layout size={10} className="opacity-0 group-hover/name:opacity-30 transition-opacity" />
-                                              </div>
-                                            )}
-                                            <div className="flex flex-col gap-1 mt-1">
-                                              <div className="flex items-center gap-2">
-                                                <div className="text-[9px] text-gray-400 uppercase tracking-widest font-bold">ID: {lot.id}</div>
-                                                <button onClick={() => copyToClipboard(lot.id)} className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded transition-colors text-gray-400">
-                                                  <Copy size={10} />
-                                                </button>
-                                                {lot.universeId !== universeId && (
-                                                    <span className="text-[7px] bg-gray-200 dark:bg-white/10 px-1 rounded text-gray-500 uppercase font-black">Outer Univ</span>
-                                                )}
-                                              </div>
-                                              
-                                              {editingId === lot.id && editingField === 'group' ? (
-                                                <input 
-                                                  autoFocus
-                                                  value={editValue}
-                                                  onChange={e => setEditValue(e.target.value)}
-                                                  onBlur={saveEdit}
-                                                  onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
-                                                  className="w-full bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-2 py-0.5 text-[10px] font-bold outline-none mt-1"
-                                                />
-                                              ) : (
-                                                <div 
-                                                  onClick={() => startEditing(lot.id, 'group', lot.baseName || 'Inventory')}
-                                                  className="text-[10px] text-gray-400 uppercase tracking-widest font-bold cursor-text hover:text-black dark:hover:text-white transition-colors flex items-center gap-1.5 group/group"
-                                                >
-                                                  Group: {lot.baseName || 'Inventory'}
-                                                  <LayoutGrid size={10} className="opacity-0 group-hover/group:opacity-30 transition-opacity" />
-                                                </div>
-                                              )}
-                                            </div>
-                                          </div>
-                                          {lot.isForSale ? (
-                                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-green-500/10 text-green-500 border border-green-500/20 shadow-sm">
-                                              <span className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
-                                              For Sale
-                                            </span>
-                                          ) : (
-                                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-gray-500/10 text-gray-500 border border-gray-500/20">
-                                              Off-Sale
-                                            </span>
-                                          )}
-                                        </div>
-            
-                                        <div className="flex items-center justify-between bg-gray-50 dark:bg-white/5 p-3 rounded-2xl border border-gray-100 dark:border-white/5">
-                                          <div className="space-y-1">
-                                            <div className="text-[8px] uppercase font-bold text-gray-400 tracking-widest">Market Price</div>
-                                            <div className={`font-mono text-sm font-bold flex items-center gap-1.5 ${lot.price != Number(globalPrice) ? 'text-orange-500' : 'text-gray-900 dark:text-gray-100'}`}>
-                                              <Hexagon size={12} className="opacity-50 fill-current" />
-                                              {editingId === lot.id && editingField === 'price' ? (
-                                                <input 
-                                                  autoFocus
-                                                  type="number"
-                                                  value={editValue}
-                                                  onChange={e => setEditValue(e.target.value)}
-                                                  onBlur={saveEdit}
-                                                  onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
-                                                  className="w-20 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 outline-none"
-                                                />
-                                              ) : (
-                                                <span onClick={() => startEditing(lot.id, 'price', lot.price)} className="cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded transition-colors">
-                                                  {lot.price.toLocaleString()}
-                                                </span>
-                                              )}
-                                            </div>
-                                          </div>
-                                          <div className="flex gap-2">
-                                            <button 
-                                              onClick={() => startEditing(lot.id, 'group', lot.baseName || 'Inventory')}
-                                              className="p-3 bg-gray-100 dark:bg-white/5 text-gray-400 rounded-xl active:scale-95 transition-all"
-                                              title="Change Group"
-                                            >
-                                              <LayoutGrid size={16} />
-                                            </button>
-                                            <button 
-                                              onClick={() => updateAsset(lot.id, { price: Number(globalPrice) })}
-                                              disabled={isLoading}
-                                              className="p-3 bg-blue-500/10 text-blue-500 rounded-xl active:scale-95 transition-all"
-                                              title="Sync Price"
-                                            >
-                                              <RefreshCw size={16} />
-                                            </button>
-                                            <button 
-                                              onClick={() => updateAsset(lot.id, { isForSale: !lot.isForSale })}
-                                              disabled={isLoading}
-                                              className={`p-3 rounded-xl active:scale-95 transition-all ${lot.isForSale ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}
-                                              title="Toggle Sale"
-                                            >
-                                              <Power size={16} />
-                                            </button>
-                                          </div>
-                                        </div>
-                                    </>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                {/* Mobile Card View */}
+                <div className="md:hidden divide-y divide-gray-50 dark:divide-white/5">
+                  {(Object.entries(groupedLots) as [string, Lot[]][]).map(([group, assets]) => (
+                    <div key={group}>
+                      <div className="px-5 py-2 bg-gray-100/50 dark:bg-white/[0.02] border-b border-gray-200 dark:border-white/5 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">
+                        {group}
                       </div>
-                    );
-                  })}
-                  </motion.div>
-                </AnimatePresence>
+                      <div className="divide-y divide-gray-50 dark:divide-white/5">
+                        {assets.map(lot => (
+                          <div key={lot.id} className="p-5 space-y-4">
+                            <div className="flex justify-between items-start">
+                              <div className="flex-1 mr-4">
+                                {editingId === lot.id && editingField === 'name' ? (
+                                  <input 
+                                    autoFocus
+                                    value={editValue}
+                                    onChange={e => setEditValue(e.target.value)}
+                                    onBlur={saveEdit}
+                                    onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                    className="w-full bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-2 py-1 text-sm font-bold outline-none"
+                                  />
+                                ) : (
+                                  <div 
+                                    onClick={() => startEditing(lot.id, 'name', lot.name)}
+                                    className="font-bold text-sm text-gray-900 dark:text-gray-100 cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded -ml-1 transition-colors flex items-center gap-1.5 group/name"
+                                  >
+                                    {lot.name}
+                                    <Layout size={10} className="opacity-0 group-hover/name:opacity-30 transition-opacity" />
+                                  </div>
+                                )}
+                                <div className="flex flex-col gap-1 mt-1">
+                                  <div className="flex items-center gap-2">
+                                    <div className="text-[9px] text-gray-400 uppercase tracking-widest font-bold">ID: {lot.id}</div>
+                                    <button onClick={() => copyToClipboard(lot.id)} className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded transition-colors text-gray-400">
+                                      <Copy size={10} />
+                                    </button>
+                                  </div>
+                                  
+                                  {editingId === lot.id && editingField === 'group' ? (
+                                    <input 
+                                      autoFocus
+                                      value={editValue}
+                                      onChange={e => setEditValue(e.target.value)}
+                                      onBlur={saveEdit}
+                                      onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                      className="w-full bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-2 py-0.5 text-[10px] font-bold outline-none mt-1"
+                                    />
+                                  ) : (
+                                    <div 
+                                      onClick={() => startEditing(lot.id, 'group', lot.baseName || 'Inventory')}
+                                      className="text-[10px] text-gray-400 uppercase tracking-widest font-bold cursor-text hover:text-black dark:hover:text-white transition-colors flex items-center gap-1.5 group/group"
+                                    >
+                                      Group: {lot.baseName || 'Inventory'}
+                                      <LayoutGrid size={10} className="opacity-0 group-hover/group:opacity-30 transition-opacity" />
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              {lot.isForSale ? (
+                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-green-500/10 text-green-500 border border-green-500/20 shadow-sm">
+                                  <span className="w-1 h-1 rounded-full bg-green-500 animate-pulse" />
+                                  For Sale
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[8px] font-black uppercase bg-gray-500/10 text-gray-500 border border-gray-500/20">
+                                  Off-Sale
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center justify-between bg-gray-50 dark:bg-white/5 p-3 rounded-2xl border border-gray-100 dark:border-white/5">
+                              <div className="space-y-1">
+                                <div className="text-[8px] uppercase font-bold text-gray-400 tracking-widest">Market Price</div>
+                                <div className={`font-mono text-sm font-bold flex items-center gap-1.5 ${lot.price != Number(globalPrice) ? 'text-orange-500' : 'text-gray-900 dark:text-gray-100'}`}>
+                                  <Hexagon size={12} className="opacity-50 fill-current" />
+                                  {editingId === lot.id && editingField === 'price' ? (
+                                    <input 
+                                      autoFocus
+                                      type="number"
+                                      value={editValue}
+                                      onChange={e => setEditValue(e.target.value)}
+                                      onBlur={saveEdit}
+                                      onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                      className="w-20 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 outline-none"
+                                    />
+                                  ) : (
+                                    <span onClick={() => startEditing(lot.id, 'price', lot.price)} className="cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded transition-colors">
+                                      {lot.price.toLocaleString()}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex gap-2">
+                                <button 
+                                  onClick={() => startEditing(lot.id, 'group', lot.baseName || 'Inventory')}
+                                  className="p-3 bg-gray-100 dark:bg-white/5 text-gray-400 rounded-xl active:scale-95 transition-all"
+                                  title="Change Group"
+                                >
+                                  <LayoutGrid size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => updateAsset(lot.id, { price: Number(globalPrice) })}
+                                  disabled={isLoading}
+                                  className="p-3 bg-blue-500/10 text-blue-500 rounded-xl active:scale-95 transition-all"
+                                  title="Sync Price"
+                                >
+                                  <RefreshCw size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => updateAsset(lot.id, { isForSale: !lot.isForSale })}
+                                  disabled={isLoading}
+                                  className={`p-3 rounded-xl active:scale-95 transition-all ${lot.isForSale ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}
+                                  title="Toggle Sale"
+                                >
+                                  <Power size={16} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
 
                 {/* Desktop Table View */}
-                {viewLayout !== 'grid' && (
-                  <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead>
-                        <tr className="text-[10px] uppercase font-bold tracking-widest text-gray-400 border-b border-gray-50 dark:border-white/5 bg-white dark:bg-transparent">
-                          <th className="px-6 py-5">Status</th>
-                          <th className="px-6 py-5">Asset Identity</th>
-                          <th className="px-6 py-5 text-right">Roblox Value</th>
-                          <th className="px-6 py-5 text-center">Cloud Reference</th>
-                          <th className="px-6 py-5 text-right">Operations</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-50 dark:divide-white/5">
-                        {(Object.entries(groupedLots) as [string, Lot[]][]).map(([group, assets]) => {
-                          const isCollapsed = collapsedGroups[group];
-                          return (
-                            <React.Fragment key={group}>
-                              <tr 
-                                onClick={() => toggleGroup(group)}
-                                className="bg-gray-100/50 dark:bg-white/[0.02] cursor-pointer hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
-                              >
-                                <td colSpan={5} className={`px-6 ${viewLayout === 'compact' ? 'py-1.5' : 'py-3'}`}>
-                                  <div className="flex items-center gap-2">
-                                    {isCollapsed ? <ChevronRight size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
-                                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">{group}</span>
-                                    <span className="text-[8px] font-bold text-gray-400 ml-1">({assets.length})</span>
-                                    <div className="h-px flex-1 bg-gray-200 dark:bg-white/5 ml-2" />
-                                  </div>
-                                </td>
-                              </tr>
-                              {!isCollapsed && assets.map(lot => (
-                                <tr key={lot.id} className={`group hover:bg-gray-50/50 dark:hover:bg-white/[0.02] transition-colors ${lot.universeId !== universeId ? 'opacity-60 bg-gray-50/50 dark:bg-white/[0.01]' : ''}`}>
-                                  <td className={`px-6 ${viewLayout === 'compact' ? 'py-2' : 'py-4'}`}>
-                                    {lot.isForSale ? (
-                                      <span className={`inline-flex items-center gap-1.5 rounded-full font-black uppercase bg-green-500/10 text-green-500 border border-green-500/20 shadow-sm shadow-green-500/5 ${viewLayout === 'compact' ? 'px-1.5 py-0.5 text-[7px]' : 'px-2.5 py-1 text-[9px]'}`}>
-                                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                                        For Sale
-                                      </span>
-                                    ) : (
-                                      <span className={`inline-flex items-center gap-1.5 rounded-full font-black uppercase bg-gray-500/10 text-gray-500 border border-gray-500/20 ${viewLayout === 'compact' ? 'px-1.5 py-0.5 text-[7px]' : 'px-2.5 py-1 text-[9px]'}`}>
-                                        Off-Sale
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td className={`px-6 ${viewLayout === 'compact' ? 'py-2' : 'py-4'} text-xs`}>
-                                    <div className="flex items-center gap-4">
-                                      <div className="flex-1">
-                                        {editingId === lot.id && editingField === 'name' ? (
-                                            <input 
-                                              autoFocus
-                                              value={editValue}
-                                              onChange={e => setEditValue(e.target.value)}
-                                              onBlur={saveEdit}
-                                              onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
-                                              className="w-full bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-2 py-0.5 text-sm font-bold outline-none"
-                                            />
-                                        ) : (
-                                            <div 
-                                              onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'name', lot.name); }}
-                                              className={`font-bold tracking-tight text-gray-900 dark:text-gray-100 cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded -ml-1 transition-colors flex items-center gap-1.5 group/name ${viewLayout === 'compact' ? 'text-xs' : 'text-sm'}`}
-                                            >
-                                              {lot.name}
-                                              <Layout size={10} className="opacity-0 group-hover/name:opacity-30 transition-opacity" />
-                                            </div>
-                                        )}
-                                        {viewLayout === 'detailed' && (
-                                            <div className="flex items-center gap-1.5 mt-0.5">
-                                              {editingId === lot.id && editingField === 'group' ? (
-                                                <input 
-                                                  autoFocus
-                                                  value={editValue}
-                                                  onChange={e => setEditValue(e.target.value)}
-                                                  onBlur={saveEdit}
-                                                  onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
-                                                  className="w-32 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-[10px] font-bold outline-none"
-                                                />
-                                              ) : (
-                                                <div 
-                                                  onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'group', lot.baseName || 'Inventory'); }}
-                                                  className="text-[10px] text-gray-400 uppercase tracking-[0.2em] font-bold cursor-text hover:text-black dark:hover:text-white transition-colors flex items-center gap-1.5 group/group"
-                                                >
-                                                  {lot.baseName || 'Inventory'}
-                                                  <LayoutGrid size={10} className="opacity-0 group-hover/group:opacity-30 transition-opacity" />
-                                                </div>
-                                              )}
-                                              {lot.universeId !== universeId && (
-                                                  <span className="text-[7px] bg-gray-200 dark:bg-white/10 px-1 rounded text-gray-400 uppercase font-bold border border-transparent group-hover:border-gray-500/20">Univ: {lot.universeId}</span>
-                                              )}
-                                            </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </td>
-                                  <td className={`px-6 ${viewLayout === 'compact' ? 'py-2' : 'py-4'} text-right`}>
-                                    <div className={`font-mono font-bold flex items-center justify-end gap-1.5 ${viewLayout === 'compact' ? 'text-xs' : 'text-sm'} ${lot.price != Number(globalPrice) ? 'text-orange-500 underline decoration-dotted decoration-orange-500/50' : 'text-gray-900 dark:text-gray-100'}`}>
-                                      <Hexagon size={12} className="opacity-50 fill-current" />
-                                      {editingId === lot.id && editingField === 'price' ? (
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="text-[10px] uppercase font-bold tracking-widest text-gray-400 border-b border-gray-50 dark:border-white/5 bg-white dark:bg-transparent">
+                        <th className="px-6 py-5">Status</th>
+                        <th className="px-6 py-5">Asset Identity</th>
+                        <th className="px-6 py-5 text-right">Roblox Value</th>
+                        <th className="px-6 py-5 text-center">Cloud Reference</th>
+                        <th className="px-6 py-5 text-right">Operations</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50 dark:divide-white/5">
+                      {(Object.entries(groupedLots) as [string, Lot[]][]).map(([group, assets]) => (
+                        <React.Fragment key={group}>
+                          <tr className="bg-gray-100/50 dark:bg-white/[0.02]">
+                            <td colSpan={5} className="px-6 py-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">{group}</span>
+                                <div className="h-px flex-1 bg-gray-200 dark:bg-white/5" />
+                              </div>
+                            </td>
+                          </tr>
+                          {assets.map(lot => (
+                            <tr key={lot.id} className="group hover:bg-gray-50/50 dark:hover:bg-white/[0.02] transition-colors">
+                              <td className="px-6 py-4">
+                                {lot.isForSale ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-green-500/10 text-green-500 border border-green-500/20 shadow-sm shadow-green-500/5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                                    For Sale
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-gray-500/10 text-gray-500 border border-gray-500/20">
+                                    Off-Sale
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 text-xs">
+                                <div className="flex items-center gap-4">
+                                  <div className="flex-1">
+                                    {editingId === lot.id && editingField === 'name' ? (
                                         <input 
                                           autoFocus
-                                          type="number"
                                           value={editValue}
                                           onChange={e => setEditValue(e.target.value)}
                                           onBlur={saveEdit}
                                           onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
-                                          className="w-20 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-right outline-none"
+                                          className="w-full bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-2 py-0.5 text-sm font-bold outline-none"
+                                        />
+                                    ) : (
+                                        <div 
+                                          onClick={() => startEditing(lot.id, 'name', lot.name)}
+                                          className="font-bold text-sm tracking-tight text-gray-900 dark:text-gray-100 cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded -ml-1 transition-colors flex items-center gap-1.5 group/name"
+                                        >
+                                          {lot.name}
+                                          <Layout size={10} className="opacity-0 group-hover/name:opacity-30 transition-opacity" />
+                                        </div>
+                                    )}
+                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                      {editingId === lot.id && editingField === 'group' ? (
+                                        <input 
+                                          autoFocus
+                                          value={editValue}
+                                          onChange={e => setEditValue(e.target.value)}
+                                          onBlur={saveEdit}
+                                          onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                          className="w-32 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-[10px] font-bold outline-none"
                                         />
                                       ) : (
-                                        <span 
-                                          onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'price', lot.price); }}
-                                          className="cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded transition-colors"
+                                        <div 
+                                          onClick={() => startEditing(lot.id, 'group', lot.baseName || 'Inventory')}
+                                          className="text-[10px] text-gray-400 uppercase tracking-[0.2em] font-bold cursor-text hover:text-black dark:hover:text-white transition-colors flex items-center gap-1.5 group/group"
                                         >
-                                          {lot.price.toLocaleString()}
-                                        </span>
+                                          {lot.baseName || 'Inventory'}
+                                          <LayoutGrid size={10} className="opacity-0 group-hover/group:opacity-30 transition-opacity" />
+                                        </div>
                                       )}
                                     </div>
-                                    {lot.price != Number(globalPrice) && viewLayout === 'detailed' && (
-                                        <div className="text-[8px] font-bold text-orange-400 uppercase tracking-tighter mt-0.5">Price Mismatch</div>
-                                    )}
-                                  </td>
-                                  <td className={`px-6 ${viewLayout === 'compact' ? 'py-2' : 'py-4'} text-center`}>
-                                    <div className="flex items-center justify-center gap-2">
-                                      <code className="text-[10px] font-mono text-gray-400 px-3 py-1 bg-gray-100 dark:bg-white/5 rounded-lg border border-transparent group-hover:border-gray-200 dark:group-hover:border-white/10 transition-all">{lot.id}</code>
-                                      <button onClick={(e) => { e.stopPropagation(); copyToClipboard(lot.id); }} className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-gray-100 dark:hover:bg-white/10 rounded-lg transition-all text-gray-400 hover:text-black dark:hover:text-white">
-                                        <Copy size={12} />
-                                      </button>
-                                    </div>
-                                  </td>
-                                  <td className={`px-6 ${viewLayout === 'compact' ? 'py-2' : 'py-4'} text-right`}>
-                                    <div className="flex items-center justify-end gap-1.5 opacity-40 group-hover:opacity-100 transition-opacity">
-                                      <button 
-                                        onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'group', lot.baseName || 'Inventory'); }}
-                                        className="p-2.5 hover:bg-gray-100 dark:hover:bg-white/5 text-gray-400 hover:text-black dark:hover:text-white rounded-xl transition-all"
-                                        title="Change Group"
-                                      >
-                                        <LayoutGrid size={14} />
-                                      </button>
-                                      <button 
-                                        onClick={(e) => { e.stopPropagation(); updateAsset(lot.id, { price: Number(globalPrice) }); }}
-                                        disabled={isLoading}
-                                        className="p-2.5 hover:bg-blue-50 dark:hover:bg-blue-500/10 text-gray-400 hover:text-blue-500 rounded-xl transition-all"
-                                        title="Sync to Global price"
-                                      >
-                                        <RefreshCw size={14} />
-                                      </button>
-                                      <button 
-                                        onClick={(e) => { e.stopPropagation(); updateAsset(lot.id, { isForSale: !lot.isForSale }); }}
-                                        disabled={isLoading}
-                                        className={`p-2.5 rounded-xl transition-all ${lot.isForSale ? 'text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5'}`}
-                                        title={lot.isForSale ? "Set Off-Sale" : "Set On-Sale"}
-                                      >
-                                        <Power size={14} />
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                            </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <div className={`font-mono text-sm font-bold flex items-center justify-end gap-1.5 ${lot.price != Number(globalPrice) ? 'text-orange-500 underline decoration-dotted decoration-orange-500/50' : 'text-gray-900 dark:text-gray-100'}`}>
+                                  <Hexagon size={12} className="opacity-50 fill-current" />
+                                  {editingId === lot.id && editingField === 'price' ? (
+                                    <input 
+                                      autoFocus
+                                      type="number"
+                                      value={editValue}
+                                      onChange={e => setEditValue(e.target.value)}
+                                      onBlur={saveEdit}
+                                      onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                      className="w-20 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-right outline-none"
+                                    />
+                                  ) : (
+                                    <span 
+                                      onClick={() => startEditing(lot.id, 'price', lot.price)}
+                                      className="cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded transition-colors"
+                                    >
+                                      {lot.price.toLocaleString()}
+                                    </span>
+                                  )}
+                                </div>
+                                {lot.price != Number(globalPrice) && (
+                                    <div className="text-[8px] font-bold text-orange-400 uppercase tracking-tighter mt-0.5">Price Mismatch</div>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  <code className="text-[10px] font-mono text-gray-400 px-3 py-1 bg-gray-100 dark:bg-white/5 rounded-lg border border-transparent group-hover:border-gray-200 dark:group-hover:border-white/10 transition-all">{lot.id}</code>
+                                  <button onClick={() => copyToClipboard(lot.id)} className="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-gray-100 dark:hover:bg-white/10 rounded-lg transition-all text-gray-400 hover:text-black dark:hover:text-white">
+                                    <Copy size={12} />
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <div className="flex items-center justify-end gap-1.5 opacity-40 group-hover:opacity-100 transition-opacity">
+                                  <button 
+                                    onClick={() => startEditing(lot.id, 'group', lot.baseName || 'Inventory')}
+                                    className="p-2.5 hover:bg-gray-100 dark:hover:bg-white/5 text-gray-400 hover:text-black dark:hover:text-white rounded-xl transition-all"
+                                    title="Change Group"
+                                  >
+                                    <LayoutGrid size={14} />
+                                  </button>
+                                  <button 
+                                    onClick={() => updateAsset(lot.id, { price: Number(globalPrice) })}
+                                    disabled={isLoading}
+                                    className="p-2.5 hover:bg-blue-50 dark:hover:bg-blue-500/10 text-gray-400 hover:text-blue-500 rounded-xl transition-all"
+                                    title="Sync to Global price"
+                                  >
+                                    <RefreshCw size={14} />
+                                  </button>
+                                  <button 
+                                    onClick={() => updateAsset(lot.id, { isForSale: !lot.isForSale })}
+                                    disabled={isLoading}
+                                    className={`p-2.5 rounded-xl transition-all ${lot.isForSale ? 'text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5'}`}
+                                    title={lot.isForSale ? "Set Off-Sale" : "Set On-Sale"}
+                                  >
+                                    <Power size={14} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
                 {Object.keys(groupedLots).length === 0 && (
                   <div className="px-6 py-20 text-center text-gray-400">
