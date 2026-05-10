@@ -101,7 +101,7 @@ export default function App() {
 
   const fetchLots = async () => {
     try {
-      const r = await fetch('/api/get_ids');
+      const r = await fetch('/get_ids');
       const data = await r.json();
       setLots(data.lots || []);
     } catch (e) {
@@ -113,7 +113,7 @@ export default function App() {
     if (!apiKey || !universeId) return notify("Set API Key & Universe ID in Settings first", "err");
     setIsLoading(true);
     try {
-      const r = await fetch('/api/check_prices', {
+      const r = await fetch('/check_prices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey, universeId })
@@ -134,7 +134,7 @@ export default function App() {
     if (!apiKey || !universeId) return notify("Set credentials in Settings", "err");
     setIsLoading(true);
     try {
-      const r = await fetch('/api/import_existing', {
+      const r = await fetch('/import_existing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey, universeId, filterName })
@@ -161,30 +161,29 @@ export default function App() {
     setIsLoading(true);
     try {
       const fd = new FormData();
-      fd.append('name', newName);
-      fd.append('baseName', 'Inventory');
-      fd.append('description', newDesc);
+      fd.append('name', newName || "Stock Share #1");
+      fd.append('description', newDesc || "Acuity.sys Automated Lot");
       fd.append('price', newPrice);
       fd.append('isForSale', String(newIsForSale));
       fd.append('imageFile', newIcon);
       fd.append('universeId', universeId);
       fd.append('apiKey', apiKey);
+      fd.append('baseName', 'Inventory');
 
       const r = await fetch('/api/create_gamepass', {
         method: 'POST',
         body: fd
       });
       
-      const text = await r.text();
-      let d;
+      const responseText = await r.text();
+      let d: any;
       try {
-        d = JSON.parse(text);
+        d = JSON.parse(responseText);
       } catch (err) {
-        console.error("Non-JSON response", err, text);
-        throw new Error(`Server error: ${text.slice(0, 100)}`);
+        d = { message: responseText };
       }
       
-      if (d.status === 'success') {
+      if (r.ok && d.status === 'success') {
         notify("Gamepass created successfully!", "ok");
         setNewName('');
         setNewDesc('');
@@ -192,11 +191,13 @@ export default function App() {
         await fetchLots();
         setTab('live');
       } else {
-        notify(d.message || "Creation failed", "err");
+        const errorMsg = d.message || d.error || "Creation failed";
+        notify(`ROBLOX Error: ${errorMsg}`, "err");
+        console.error("Gamepass creation error:", d);
       }
-    } catch (e: any) {
-      console.error("Creation Error:", e);
-      notify(e.message || "Network error during creation", "err");
+    } catch (e) {
+      notify("Network error during creation", "err");
+      console.error(e);
     } finally {
       setIsLoading(false);
     }
@@ -207,7 +208,7 @@ export default function App() {
     if (!confirm(`Sync ALL tracked assets in this universe to ${globalPrice} Robux?`)) return;
     setIsLoading(true);
     try {
-      const r = await fetch('/api/sync', {
+      const r = await fetch('/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey, universeId, price: Number(globalPrice) })
@@ -221,21 +222,18 @@ export default function App() {
   };
 
   const updateAsset = async (id: string, updates: Partial<Lot>) => {
-    const lot = lots.find(l => l.id === id);
-    if (!lot) return;
-
     try {
-      const r = await fetch('/api/update_asset', {
+      const r = await fetch('/update_asset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
             id, 
             universeId, 
             apiKey, 
-            name: updates.name ?? lot.name,
-            baseName: updates.baseName ?? lot.baseName,
-            price: updates.price ?? lot.price,
-            forSale: updates.isForSale ?? lot.isForSale 
+            name: updates.name,
+            baseName: updates.baseName,
+            price: updates.price,
+            forSale: updates.isForSale 
         })
       });
       const d = await r.json();
@@ -720,7 +718,7 @@ export default function App() {
                                   <LayoutGrid size={16} />
                                 </button>
                                 <button 
-                                  onClick={() => updateAsset(lot.id, { price: Number(globalPrice), isForSale: lot.isForSale })}
+                                  onClick={() => updateAsset(lot.id, { price: Number(globalPrice) })}
                                   disabled={isLoading}
                                   className="p-3 bg-blue-500/10 text-blue-500 rounded-xl active:scale-95 transition-all"
                                   title="Sync Price"
@@ -728,7 +726,7 @@ export default function App() {
                                   <RefreshCw size={16} />
                                 </button>
                                 <button 
-                                  onClick={() => updateAsset(lot.id, { isForSale: !lot.isForSale, price: lot.price })}
+                                  onClick={() => updateAsset(lot.id, { isForSale: !lot.isForSale })}
                                   disabled={isLoading}
                                   className={`p-3 rounded-xl active:scale-95 transition-all ${lot.isForSale ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}
                                   title="Toggle Sale"
@@ -869,7 +867,7 @@ export default function App() {
                                     <LayoutGrid size={14} />
                                   </button>
                                   <button 
-                                    onClick={() => updateAsset(lot.id, { price: Number(globalPrice), isForSale: lot.isForSale })}
+                                    onClick={() => updateAsset(lot.id, { price: Number(globalPrice) })}
                                     disabled={isLoading}
                                     className="p-2.5 hover:bg-blue-50 dark:hover:bg-blue-500/10 text-gray-400 hover:text-blue-500 rounded-xl transition-all"
                                     title="Sync to Global price"
@@ -877,7 +875,7 @@ export default function App() {
                                     <RefreshCw size={14} />
                                   </button>
                                   <button 
-                                    onClick={() => updateAsset(lot.id, { isForSale: !lot.isForSale, price: lot.price })}
+                                    onClick={() => updateAsset(lot.id, { isForSale: !lot.isForSale })}
                                     disabled={isLoading}
                                     className={`p-2.5 rounded-xl transition-all ${lot.isForSale ? 'text-green-500 hover:bg-green-50 dark:hover:bg-green-500/10' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5'}`}
                                     title={lot.isForSale ? "Set Off-Sale" : "Set On-Sale"}
@@ -930,8 +928,7 @@ export default function App() {
                         <label className="text-[10px] uppercase font-bold tracking-widest text-gray-400">Asset Name</label>
                         <input 
                             type="text"
-                            required
-                            placeholder="Stock Share #1"
+                            placeholder="e.g. Stock Share #1"
                             value={newName}
                             onChange={e => setNewName(e.target.value)}
                             className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl py-3 px-4 outline-none focus:border-black dark:focus:border-white transition-all text-sm"

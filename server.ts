@@ -36,12 +36,6 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Logging middleware
-  app.use((req, res, next) => {
-    console.log(`${req.method} ${req.path}`);
-    next();
-  });
-
   // ─── Roblox API Proxy Helpers ──────────────────────────────────────────────
 
   const getHeaders = (apiKey: string) => ({
@@ -54,12 +48,12 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
-  app.get("/api/get_ids", (req, res) => {
+  app.get("/get_ids", (req, res) => {
     res.json({ lots: loadLots() });
   });
 
   // LIST: Get all gamepasses from Roblox
-  app.post("/api/import_existing", async (req, res) => {
+  app.post("/import_existing", async (req, res) => {
     const { filterName, universeId, apiKey } = req.body;
     if (!universeId || !apiKey) return res.status(400).json({ error: "Missing credentials" });
 
@@ -112,42 +106,48 @@ async function startServer() {
       const url = `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes`;
       
       const form = new FormData();
+      // Match the Python snippet's field names exactly
       form.append("name", name);
       form.append("description", description || "Created via BloxEx Cloud Manager");
       form.append("price", String(price || 0));
       form.append("isForSale", String(isForSale === 'true' || isForSale === true));
+      
+      // The imageFile must be appended last or with proper headers
       form.append("imageFile", file.buffer, {
-        filename: file.originalname,
-        contentType: file.mimetype,
+        filename: file.originalname || 'icon.jpg',
+        contentType: file.mimetype || 'image/jpeg',
       });
 
-      console.log(`[POST] Creating gamepass in universe ${universeId}...`);
+      console.log(`[Gamepass Creation] Calling Roblox API: ${url}`);
+      
       const r = await fetch(url, {
         method: "POST",
-        headers: { ...getHeaders(apiKey), ...form.getHeaders() },
+        headers: { 
+          ...getHeaders(apiKey), 
+          ...form.getHeaders() 
+        },
         body: form
       });
 
-      const rText = await r.text();
+      const responseText = await r.text();
       let data: any;
       try {
-        data = JSON.parse(rText);
-      } catch (parseErr) {
-        console.error("Roblox POST Parse Error:", rText);
-        throw new Error(`Roblox Error ${r.status}: Invalid JSON response`);
+        data = JSON.parse(responseText);
+      } catch (e) {
+        data = { message: responseText };
       }
 
       if (!r.ok) {
-        console.error("Roblox Creation Error:", data);
-        throw new Error(data.message || `Roblox Error ${r.status}`);
+        console.error("Roblox API Error:", responseText);
+        // Extract a better error message if possible
+        const errorMessage = data.message || (data.errors && data.errors[0]?.message) || `Roblox Error ${r.status}`;
+        throw new Error(errorMessage);
       }
-
-      const gamePassId = data.gamePassId;
 
       // Track the new gamepass
       const existing = loadLots();
       const newLot = {
-        id: String(gamePassId),
+        id: String(data.gamePassId),
         baseName: baseName || "Inventory",
         num: existing.length + 1,
         universeId: universeId,
@@ -157,7 +157,7 @@ async function startServer() {
       };
       saveLots([...existing, newLot]);
 
-      res.json({ status: "success", gamePassId: gamePassId });
+      res.json({ status: "success", gamePassId: data.gamePassId });
     } catch (e: any) {
       console.error("Creation failed:", e);
       res.status(500).json({ status: "error", message: e.message });
@@ -165,7 +165,7 @@ async function startServer() {
   });
 
   // GET: Audit prices for universe
-  app.post("/api/check_prices", async (req, res) => {
+  app.post("/check_prices", async (req, res) => {
     const { universeId, apiKey } = req.body;
     const lots = loadLots().filter(l => l.universeId === universeId);
     
@@ -196,7 +196,7 @@ async function startServer() {
   });
 
   // PATCH: Update asset details (name, group, price, sale status)
-  app.post("/api/update_asset", async (req, res) => {
+  app.post("/update_asset", async (req, res) => {
     const { id, universeId, apiKey, name, baseName, price, forSale, description } = req.body;
     if (!id || !universeId || !apiKey) return res.status(400).json({ error: "Missing info" });
 
@@ -205,22 +205,19 @@ async function startServer() {
       
       const form = new FormData();
       if (name !== undefined) form.append("name", String(name));
-      if (baseName !== undefined) form.append("description", `[Group: ${baseName}] ${description || ""}`); 
+      if (baseName !== undefined) form.append("description", `[Group: ${baseName}] ${description || ""}`); // Optional: track group in description if needed, or just update local cache
       if (price !== undefined) form.append("price", String(price));
       if (forSale !== undefined) form.append("isForSale", String(forSale));
 
       const r = await fetch(url, {
         method: "PATCH",
-        headers: { 
-          ...getHeaders(apiKey),
-          ...form.getHeaders()
-        },
+        headers: { ...getHeaders(apiKey), ...form.getHeaders() },
         body: form
       });
 
-      const rText = await r.text();
       if (!r.ok) {
-        throw new Error(`Roblox Error ${r.status}: ${rText}`);
+        const txt = await r.text();
+        throw new Error(`Roblox Error ${r.status}: ${txt}`);
       }
 
       // Update local cache
@@ -241,7 +238,7 @@ async function startServer() {
   });
 
   // BULK SYNC
-  app.post("/api/sync", async (req, res) => {
+  app.post("/sync", async (req, res) => {
     const { universeId, apiKey, price } = req.body;
     const lots = loadLots().filter(l => l.universeId === universeId);
     
@@ -255,10 +252,7 @@ async function startServer() {
 
         const r = await fetch(url, {
           method: "PATCH",
-          headers: { 
-            ...getHeaders(apiKey),
-            ...form.getHeaders()
-          },
+          headers: { ...getHeaders(apiKey), ...form.getHeaders() },
           body: form
         });
 
