@@ -106,42 +106,24 @@ async function startServer() {
       const url = `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes`;
       
       const form = new FormData();
-      // Match the Python snippet's field names exactly
       form.append("name", name);
       form.append("description", description || "Created via BloxEx Cloud Manager");
       form.append("price", String(price || 0));
       form.append("isForSale", String(isForSale === 'true' || isForSale === true));
-      
-      // The imageFile must be appended last or with proper headers
       form.append("imageFile", file.buffer, {
-        filename: file.originalname || 'icon.jpg',
-        contentType: file.mimetype || 'image/jpeg',
+        filename: file.originalname,
+        contentType: file.mimetype,
       });
 
-      console.log(`[Gamepass Creation] Calling Roblox API: ${url}`);
-      
       const r = await fetch(url, {
         method: "POST",
-        headers: { 
-          ...getHeaders(apiKey), 
-          ...form.getHeaders() 
-        },
+        headers: { ...getHeaders(apiKey), ...form.getHeaders() },
         body: form
       });
 
-      const responseText = await r.text();
-      let data: any;
-      try {
-        data = JSON.parse(responseText);
-      } catch (e) {
-        data = { message: responseText };
-      }
-
+      const data: any = await r.json();
       if (!r.ok) {
-        console.error("Roblox API Error:", responseText);
-        // Extract a better error message if possible
-        const errorMessage = data.message || (data.errors && data.errors[0]?.message) || `Roblox Error ${r.status}`;
-        throw new Error(errorMessage);
+        throw new Error(data.message || `Roblox Error ${r.status}`);
       }
 
       // Track the new gamepass

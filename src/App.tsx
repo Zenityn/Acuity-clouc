@@ -161,29 +161,22 @@ export default function App() {
     setIsLoading(true);
     try {
       const fd = new FormData();
-      fd.append('name', newName || "Stock Share #1");
-      fd.append('description', newDesc || "Acuity.sys Automated Lot");
+      fd.append('name', newName);
+      fd.append('baseName', 'Inventory');
+      fd.append('description', newDesc);
       fd.append('price', newPrice);
       fd.append('isForSale', String(newIsForSale));
       fd.append('imageFile', newIcon);
       fd.append('universeId', universeId);
       fd.append('apiKey', apiKey);
-      fd.append('baseName', 'Inventory');
 
       const r = await fetch('/api/create_gamepass', {
         method: 'POST',
         body: fd
       });
+      const d = await r.json();
       
-      const responseText = await r.text();
-      let d: any;
-      try {
-        d = JSON.parse(responseText);
-      } catch (err) {
-        d = { message: responseText };
-      }
-      
-      if (r.ok && d.status === 'success') {
+      if (d.status === 'success') {
         notify("Gamepass created successfully!", "ok");
         setNewName('');
         setNewDesc('');
@@ -191,13 +184,10 @@ export default function App() {
         await fetchLots();
         setTab('live');
       } else {
-        const errorMsg = d.message || d.error || "Creation failed";
-        notify(`ROBLOX Error: ${errorMsg}`, "err");
-        console.error("Gamepass creation error:", d);
+        notify(d.message || "Creation failed", "err");
       }
     } catch (e) {
       notify("Network error during creation", "err");
-      console.error(e);
     } finally {
       setIsLoading(false);
     }
@@ -928,7 +918,8 @@ export default function App() {
                         <label className="text-[10px] uppercase font-bold tracking-widest text-gray-400">Asset Name</label>
                         <input 
                             type="text"
-                            placeholder="e.g. Stock Share #1"
+                            required
+                            placeholder="Stock Share #1"
                             value={newName}
                             onChange={e => setNewName(e.target.value)}
                             className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl py-3 px-4 outline-none focus:border-black dark:focus:border-white transition-all text-sm"
