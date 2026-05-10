@@ -115,21 +115,33 @@ async function startServer() {
         contentType: file.mimetype,
       });
 
+      console.log(`[POST] Creating gamepass in universe ${universeId}...`);
       const r = await fetch(url, {
         method: "POST",
         headers: { ...getHeaders(apiKey), ...form.getHeaders() },
         body: form
       });
 
-      const data: any = await r.json();
+      const rText = await r.text();
+      let data: any;
+      try {
+        data = JSON.parse(rText);
+      } catch (parseErr) {
+        console.error("Roblox POST Parse Error:", rText);
+        throw new Error(`Roblox Error ${r.status}: Invalid JSON response`);
+      }
+
       if (!r.ok) {
+        console.error("Roblox Creation Error:", data);
         throw new Error(data.message || `Roblox Error ${r.status}`);
       }
+
+      const gamePassId = data.gamePassId;
 
       // Track the new gamepass
       const existing = loadLots();
       const newLot = {
-        id: String(data.gamePassId),
+        id: String(gamePassId),
         baseName: baseName || "Inventory",
         num: existing.length + 1,
         universeId: universeId,
@@ -139,7 +151,7 @@ async function startServer() {
       };
       saveLots([...existing, newLot]);
 
-      res.json({ status: "success", gamePassId: data.gamePassId });
+      res.json({ status: "success", gamePassId: gamePassId });
     } catch (e: any) {
       console.error("Creation failed:", e);
       res.status(500).json({ status: "error", message: e.message });
@@ -187,19 +199,22 @@ async function startServer() {
       
       const form = new FormData();
       if (name !== undefined) form.append("name", String(name));
-      if (baseName !== undefined) form.append("description", `[Group: ${baseName}] ${description || ""}`); // Optional: track group in description if needed, or just update local cache
+      if (baseName !== undefined) form.append("description", `[Group: ${baseName}] ${description || ""}`); 
       if (price !== undefined) form.append("price", String(price));
       if (forSale !== undefined) form.append("isForSale", String(forSale));
 
       const r = await fetch(url, {
         method: "PATCH",
-        headers: { ...getHeaders(apiKey), ...form.getHeaders() },
+        headers: { 
+          ...getHeaders(apiKey),
+          ...form.getHeaders()
+        },
         body: form
       });
 
+      const rText = await r.text();
       if (!r.ok) {
-        const txt = await r.text();
-        throw new Error(`Roblox Error ${r.status}: ${txt}`);
+        throw new Error(`Roblox Error ${r.status}: ${rText}`);
       }
 
       // Update local cache
@@ -234,7 +249,10 @@ async function startServer() {
 
         const r = await fetch(url, {
           method: "PATCH",
-          headers: { ...getHeaders(apiKey), ...form.getHeaders() },
+          headers: { 
+            ...getHeaders(apiKey),
+            ...form.getHeaders()
+          },
           body: form
         });
 

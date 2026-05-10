@@ -2,7 +2,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Shield, Settings, RefreshCw, Power, 
   Search, AlertTriangle, Hexagon, Copy, HelpCircle,
-  Zap, LayoutGrid, Key, Globe, Layout, Package, CheckCircle2
+  Zap, LayoutGrid, Key, Globe, Layout, Package, CheckCircle2,
+  Moon, Sun, Monitor
 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 
@@ -43,6 +44,36 @@ export default function App() {
   const [newIcon, setNewIcon] = useState<File | null>(null);
   const [showApiKeyGuide, setShowApiKeyGuide] = useState(false);
   const [showUniverseIdGuide, setShowUniverseIdGuide] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark' | 'almond' | 'system'>(() => (localStorage.getItem('theme') as 'light' | 'dark' | 'almond' | 'system') || 'system');
+
+  // Theme Logic
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.classList.remove('light', 'dark', 'almond');
+
+    if (theme === 'system') {
+      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      root.classList.add(systemTheme);
+    } else {
+      root.classList.add(theme);
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  // Listen for system theme changes
+  useEffect(() => {
+    if (theme !== 'system') return;
+    
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => {
+      const root = window.document.documentElement;
+      root.classList.remove('light', 'dark', 'almond');
+      root.classList.add(mediaQuery.matches ? 'dark' : 'light');
+    };
+
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, [theme]);
 
   // Filter State
   const [filterGroup, setFilterGroup] = useState<string>('All');
@@ -143,7 +174,15 @@ export default function App() {
         method: 'POST',
         body: fd
       });
-      const d = await r.json();
+      
+      const text = await r.text();
+      let d;
+      try {
+        d = JSON.parse(text);
+      } catch (err) {
+        console.error("Non-JSON response", err, text);
+        throw new Error(`Server error: ${text.slice(0, 100)}`);
+      }
       
       if (d.status === 'success') {
         notify("Gamepass created successfully!", "ok");
@@ -155,8 +194,9 @@ export default function App() {
       } else {
         notify(d.message || "Creation failed", "err");
       }
-    } catch (e) {
-      notify("Network error during creation", "err");
+    } catch (e: any) {
+      console.error("Creation Error:", e);
+      notify(e.message || "Network error during creation", "err");
     } finally {
       setIsLoading(false);
     }
@@ -266,13 +306,30 @@ export default function App() {
       {/* Header */}
       <header className="sticky top-0 z-50 bg-white/80 dark:bg-black/80 backdrop-blur-md border-b border-gray-200 dark:border-white/10 px-4 md:px-6 py-3 md:py-4">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3 self-start md:self-auto">
-            <div className="w-8 h-8 md:w-10 md:h-10 bg-black dark:bg-white rounded-lg md:rounded-xl flex items-center justify-center text-white dark:text-black shadow-lg">
-              <Zap size={16} className="md:w-[20px]" fill="currentColor" />
+          <div 
+            onClick={() => {
+                const themes: ('light' | 'dark' | 'almond' | 'system')[] = ['light', 'dark', 'almond', 'system'];
+                const nextIndex = (themes.indexOf(theme) + 1) % themes.length;
+                setTheme(themes[nextIndex]);
+            }}
+            className="flex items-center gap-3 self-start md:self-auto cursor-pointer group/logo"
+            title={`Theme: ${theme.charAt(0).toUpperCase() + theme.slice(1)} (Click to cycle)`}
+          >
+            <div className="w-8 h-8 md:w-10 md:h-10 bg-black dark:bg-white rounded-lg md:rounded-xl flex items-center justify-center text-white dark:text-black shadow-lg transition-all active:scale-90 group-hover/logo:rotate-6">
+              {theme === 'almond' ? <Zap size={16} className="md:w-[20px] text-orange-400" fill="currentColor" /> : <Zap size={16} className="md:w-[20px]" fill="currentColor" />}
             </div>
             <div>
               <h1 className="text-base md:text-lg font-bold tracking-tight">BloxEx <span className="hidden sm:inline text-xs font-medium text-gray-400">Cloud PRO</span></h1>
-              <p className="text-[9px] md:text-[10px] uppercase tracking-widest font-bold text-gray-400">Market Management</p>
+              <div className="flex items-center gap-2">
+                <p className="text-[9px] md:text-[10px] uppercase tracking-widest font-bold text-gray-400">Market Management</p>
+                <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10">
+                  {theme === 'light' && <Sun size={8} className="text-orange-500" />}
+                  {theme === 'dark' && <Moon size={8} className="text-blue-400" />}
+                  {theme === 'almond' && <Zap size={8} className="text-orange-400 fill-orange-400/20" />}
+                  {theme === 'system' && <Monitor size={8} className="text-gray-400" />}
+                  <span className="text-[7px] font-black uppercase text-gray-400">{theme}</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -287,6 +344,10 @@ export default function App() {
               Settings
             </button>
           </nav>
+
+          <div className="hidden md:block">
+            {/* Theme switcher moved to logo */}
+          </div>
         </div>
       </header>
 

@@ -6,7 +6,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
-@variant dark (&:where(.dark, .dark *));
+@variant dark (&:where(.dark, .dark *, .almond, .almond *));
 
 body {
   @apply bg-[#fcfcfc] text-[#1a1a1a] antialiased min-h-screen transition-colors duration-300;
@@ -14,4 +14,20 @@ body {
 
 .dark body {
   @apply bg-[#0a0a0a] text-[#f5f5f5];
+}
+
+.almond body {
+  @apply bg-[#02040a] text-[#e0e7ff];
+}
+
+.almond .bg-white\/5 {
+  @apply bg-blue-500/5;
+}
+
+.almond .bg-gray-100 {
+  @apply bg-[#0a0f1d];
+}
+
+.almond .border-white\/10 {
+  @apply border-blue-500/10;
 }
