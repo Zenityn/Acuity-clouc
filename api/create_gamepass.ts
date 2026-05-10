@@ -1,7 +1,7 @@
 import fetch from "node-fetch";
 import FormData from "form-data";
 import Busboy from "busboy";
-import { loadLots, saveLots, getRobloxHeaders } from "../src/lib/server-utils.ts";
+import { loadLots, saveLots, getRobloxHeaders } from "../src/lib/server-utils";
 
 export const config = {
   api: {

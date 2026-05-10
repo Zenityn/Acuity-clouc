@@ -3,14 +3,14 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 
 // Import handlers
-import get_ids_handler from "./api/get_ids.ts";
-import import_existing_handler from "./api/import_existing.ts";
-import update_asset_handler from "./api/update_asset.ts";
-import sync_handler from "./api/sync.ts";
-import bulk_shutdown_handler from "./api/bulk_shutdown.ts";
-import check_prices_handler from "./api/check_prices.ts";
-import create_gamepass_handler from "./api/create_gamepass.ts";
-import ping_handler from "./api/ping.ts";
+import get_ids_handler from "./api/get_ids";
+import import_existing_handler from "./api/import_existing";
+import update_asset_handler from "./api/update_asset";
+import sync_handler from "./api/sync";
+import bulk_shutdown_handler from "./api/bulk_shutdown";
+import check_prices_handler from "./api/check_prices";
+import create_gamepass_handler from "./api/create_gamepass";
+import ping_handler from "./api/ping";
 
 async function startServer() {
   const app = express();

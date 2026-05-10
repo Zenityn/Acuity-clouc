@@ -15,6 +15,7 @@
     "@tailwindcss/vite": "^4.1.14",
     "@types/busboy": "^1.5.4",
     "@types/multer": "^2.1.0",
+    "@types/node-fetch": "^2.6.13",
     "@vitejs/plugin-react": "^5.0.4",
     "busboy": "^1.6.0",
     "dotenv": "^17.2.3",
