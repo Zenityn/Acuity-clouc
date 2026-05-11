@@ -5,7 +5,7 @@ import {
   Zap, LayoutGrid, Key, Globe, Layout, Package, CheckCircle2,
   Moon, Sun, Monitor, ChevronDown, ChevronRight,
   SortAsc, SortDesc, List, Grid3X3, Maximize2,
-  User, LogOut, LogIn, Database
+  User, LogOut, LogIn, Database, Download
 } from 'lucide-react';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { auth, db, login, logout, handleFirestoreError, OperationType } from './lib/firebase';
@@ -24,6 +24,39 @@ interface Lot {
   isForSale: boolean;
 }
 
+// ── COMPONENTS ───────────────────────────────────────────────────────────────
+
+function InlineEdit({ 
+  value, 
+  onSave, 
+  onCancel, 
+  className,
+  type = "text"
+}: { 
+  value: string | number; 
+  onSave: (val: string) => void; 
+  onCancel: () => void; 
+  className: string;
+  type?: string;
+}) {
+  const [val, setVal] = useState(String(value));
+  return (
+    <input 
+      autoFocus
+      type={type}
+      value={val}
+      onChange={e => setVal(e.target.value)}
+      onBlur={() => onSave(val)}
+      onKeyDown={e => {
+        if (e.key === 'Enter') onSave(val);
+        if (e.key === 'Escape') onCancel();
+      }}
+      onClick={(e) => e.stopPropagation()}
+      className={className}
+    />
+  );
+}
+
 // ── APP ────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -32,15 +65,16 @@ export default function App() {
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('rbx_key') || '');
   const [universeId, setUniverseId] = useState(() => localStorage.getItem('rbx_universe') || '');
   const [filterName, setFilterName] = useState('');
+  const deferredFilterName = React.useDeferredValue(filterName);
   const [lots, setLots] = useState<Lot[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [globalPrice, setGlobalPrice] = useState('150');
+  const deferredGlobalPrice = React.useDeferredValue(globalPrice);
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err'; details?: string } | null>(null);
 
   // Editing State
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<'name' | 'price' | 'group' | null>(null);
-  const [editValue, setEditValue] = useState<string>('');
 
   // Creation State
   const [newName, setNewName] = useState('');
@@ -93,6 +127,8 @@ export default function App() {
   // View State
   const [viewLayout, setViewLayout] = useState<'detailed' | 'compact' | 'grid'>('detailed');
   const [expandedGridId, setExpandedGridId] = useState<string | null>(null);
+
+  const isSearching = filterName !== deferredFilterName;
 
   const notify = useCallback((msg: string, type: 'ok' | 'err') => {
     let displayMsg = msg;
@@ -153,6 +189,27 @@ export default function App() {
       handleFirestoreError(e, OperationType.WRITE, path);
     }
   }, [user]);
+
+  const handleLogin = async () => {
+    try {
+      await login();
+      notify("Authentication successful", "ok");
+    } catch (e: any) {
+      if (e?.code === 'auth/unauthorized-domain') {
+        notify(JSON.stringify({ 
+          humanReadable: "Firebase Error: Domain Not Authorized", 
+          error: "To fix this, go to Firebase Console -> Authentication -> Settings -> Authorized domains, and add this domain to the list.",
+          code: e.code 
+        }), "err");
+      } else {
+        notify(JSON.stringify({
+          humanReadable: "Firebase Sign In Failed",
+          error: e?.message || "Unknown error",
+          code: e?.code
+        }), "err");
+      }
+    }
+  };
 
   // Firebase Auth & Data Sync
   useEffect(() => {
@@ -384,19 +441,23 @@ export default function App() {
       const universeLots = lots.filter(l => l.universeId === universeId);
       
       for (const lot of universeLots) {
-        const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes/${lot.id}`;
+        const url = `/roblox-api/game-passes/v1/universes/${lot.universeId}/game-passes/${lot.id}`;
+        
         const fd = new FormData();
         fd.append("price", String(globalPrice));
         fd.append("isForSale", "true");
 
         const r = await fetch(url, {
           method: "PATCH",
-          headers: { 'x-api-key': apiKey },
+          headers: { 
+            'x-api-key': apiKey,
+            'Connection': 'close'
+          },
           body: fd
         });
 
         if (r.ok) success++;
-        await new Promise(res => setTimeout(res, 200));
+        await new Promise(res => setTimeout(res, 1000));
       }
 
       const updated = lots.map(l => (l.universeId === universeId) ? { ...l, price: Number(globalPrice), isForSale: true } : l);
@@ -417,7 +478,7 @@ export default function App() {
     const targetUniverseId = asset?.universeId || universeId;
 
     try {
-      const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes/${id}`;
+      const url = `/roblox-api/game-passes/v1/universes/${targetUniverseId}/game-passes/${id}`;
       const fd = new FormData();
       if (updates.name !== undefined) fd.append("name", String(updates.name));
       if (updates.baseName !== undefined) fd.append("description", `[Group: ${updates.baseName}]`);
@@ -426,7 +487,10 @@ export default function App() {
 
       const r = await fetch(url, {
         method: 'PATCH',
-        headers: { 'x-api-key': apiKey },
+        headers: { 
+          'x-api-key': apiKey,
+          'Connection': 'close'
+        },
         body: fd
       });
       
@@ -439,43 +503,37 @@ export default function App() {
         else localStorage.setItem('local_lots', JSON.stringify(updatedLots));
       } else {
         const d = await r.json().catch(() => ({}));
-        notify(d.message || "Update failed", "err");
+        notify(d.message || d.error || d.errorMessage || "Update failed", "err");
       }
     } catch (e) {
       notify("Network error during update", "err");
     }
   };
 
-  const startEditing = (id: string, field: 'name' | 'price' | 'group', value: string | number) => {
+  const startEditing = (id: string, field: 'name' | 'price' | 'group') => {
     setEditingId(id);
     setEditingField(field);
-    setEditValue(String(value));
   };
 
   const cancelEditing = () => {
     setEditingId(null);
     setEditingField(null);
-    setEditValue('');
   };
 
-  const saveEdit = async () => {
-    if (!editingId || !editingField) return;
-    
+  const saveEditValue = async (id: string, field: 'name' | 'price' | 'group', value: string) => {
     const updates: Partial<Lot> = {};
-    if (editingField === 'name') {
-        updates.name = editValue;
-    } else if (editingField === 'price') {
-        updates.price = Number(editValue);
-    } else if (editingField === 'group') {
-        updates.baseName = editValue;
-    }
+    if (field === 'name') updates.name = value;
+    else if (field === 'price') updates.price = Number(value);
+    else if (field === 'group') updates.baseName = value;
 
-    await updateAsset(editingId, updates);
-    cancelEditing();
+    await updateAsset(id, updates);
+    if (editingId === id && editingField === field) {
+       cancelEditing();
+    }
   };
 
   const emergencyShutdown = async () => {
-    const matchedIds = (Object.values(groupedLots) as Lot[][]).flat().map(l => l.id);
+    const matchedIds = matchedLots.map(l => l.id);
     if (matchedIds.length === 0) return notify("No assets match current filters", "err");
     
     if (!confirm(`EMERGENCY: Pull ${matchedIds.length} matched assets off-sale?`)) return;
@@ -484,18 +542,24 @@ export default function App() {
     try {
       let success = 0;
       for (const id of matchedIds) {
-        const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes/${id}`;
+        const lot = lots.find(l => l.id === id);
+        const targetUniv = lot?.universeId || universeId;
+        const url = `/roblox-api/game-passes/v1/universes/${targetUniv}/game-passes/${id}`;
+        
         const fd = new FormData();
         fd.append("isForSale", "false");
 
         const r = await fetch(url, {
           method: "PATCH",
-          headers: { 'x-api-key': apiKey },
+          headers: { 
+            'x-api-key': apiKey,
+            'Connection': 'close'
+          },
           body: fd
         });
 
         if (r.ok) success++;
-        await new Promise(res => setTimeout(res, 150));
+        await new Promise(res => setTimeout(res, 800));
       }
       
       const idSet = new Set(matchedIds);
@@ -516,7 +580,7 @@ export default function App() {
 
   const groupedLots = useMemo(() => {
     let filtered = lots.filter(l => {
-        const matchesFilter = filterName ? (l.name || '').toLowerCase().includes(filterName.toLowerCase()) : true;
+    const matchesFilter = deferredFilterName ? (l.name || '').toLowerCase().includes(deferredFilterName.toLowerCase()) : true;
         const group = l.baseName || 'Inventory';
         const matchesGroup = filterGroup === 'All' || group === filterGroup;
         
@@ -546,7 +610,13 @@ export default function App() {
         groups[group].push(lot);
     });
     return groups;
-  }, [lots, filterName, filterGroup, filterSaleStatus, sortBy, sortOrder]);
+  }, [lots, deferredFilterName, filterGroup, filterSaleStatus, sortBy, sortOrder]);
+
+  const matchedLots = useMemo(() => {
+    return Object.values(groupedLots).flat();
+  }, [groupedLots]);
+
+  const totalResults = matchedLots.length;
 
   const availableGroups = useMemo(() => {
     const sets = new Set<string>();
@@ -621,7 +691,7 @@ export default function App() {
               </div>
             ) : (
               <button 
-                onClick={login}
+                onClick={handleLogin}
                 className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-black dark:bg-white text-white dark:text-black text-[11px] font-bold hover:opacity-90 active:scale-95 transition-all shadow-md"
               >
                 <LogIn size={14} />
@@ -654,7 +724,7 @@ export default function App() {
                   </div>
                   {!user ? (
                     <button 
-                      onClick={login}
+                      onClick={handleLogin}
                       className="px-6 py-2.5 bg-black dark:bg-white text-white dark:text-black rounded-xl text-xs font-black uppercase tracking-widest hover:opacity-90 transition-all shadow-lg active:scale-95"
                     >
                       Enable Cloud
@@ -854,52 +924,17 @@ export default function App() {
                 <div className="bg-white dark:bg-white/[0.02] border border-gray-200 dark:border-white/10 p-6 rounded-3xl flex flex-col justify-between shadow-sm">
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-4 flex items-center gap-2">
-                       <Search size={14} /> Inventory Scan
+                       <Download size={14} /> Import
                     </h3>
-                    <div className="flex flex-col gap-4 mb-4">
-                        <div className="relative">
-                            <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                            <input 
-                              type="text" 
-                              placeholder="Filter by name..." 
-                              value={filterName}
-                              onChange={e => setFilterName(e.target.value)}
-                              className="w-full bg-gray-100 dark:bg-white/5 border border-transparent focus:border-black dark:focus:border-white rounded-xl py-2 pl-9 pr-4 text-xs font-medium outline-none transition-all"
-                            />
-                        </div>
-                        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
-                            <Zap size={12} className="text-gray-400 shrink-0" />
-                            {(['All', 'OnSale', 'OffSale'] as const).map(s => (
-                                <button
-                                    key={s}
-                                    onClick={() => setFilterSaleStatus(s)}
-                                    className={`px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition-all border ${filterSaleStatus === s ? 'bg-black dark:bg-white text-white dark:text-black border-transparent' : 'bg-gray-100 dark:bg-white/5 text-gray-400 border-gray-200 dark:border-white/10'}`}
-                                >
-                                    {s === 'OnSale' ? 'On Sale' : s === 'OffSale' ? 'Off Sale' : 'All Status'}
-                                </button>
-                            ))}
-                        </div>
-                        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 border-t border-gray-100 dark:border-white/5 pt-1">
-                            <LayoutGrid size={12} className="text-gray-400 shrink-0" />
-                            {availableGroups.map(g => (
-                                <button
-                                    key={g}
-                                    onClick={() => setFilterGroup(g)}
-                                    className={`px-3 py-1 rounded-full text-[10px] font-bold whitespace-nowrap transition-all border ${filterGroup === g ? 'bg-black dark:bg-white text-white dark:text-black border-transparent' : 'bg-gray-100 dark:bg-white/5 text-gray-400 border-gray-200 dark:border-white/10'}`}
-                                >
-                                    {g}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mb-4 font-medium leading-relaxed">Fetch existing gamepasses from your configured Universe into your monitored assets list.</p>
                   </div>
                   <button 
                     onClick={importExisting}
                     disabled={isLoading}
                     className="w-full bg-black dark:bg-white text-white dark:text-black py-3 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 transition-all disabled:opacity-50 shadow-md"
                   >
-                    {isLoading ? <RefreshCw className="animate-spin" size={14} /> : <Search size={14} />}
-                    SCAN ROBLOX CLOUD
+                    {isLoading ? <RefreshCw className="animate-spin" size={14} /> : <Download size={14} />}
+                    IMPORT ASSETS
                   </button>
                 </div>
 
@@ -951,16 +986,16 @@ export default function App() {
 
               {/* Main Table */}
               <div className="bg-white dark:bg-[#0c0c0c] rounded-3xl overflow-hidden border border-gray-200 dark:border-white/10 shadow-sm transition-all duration-300">
-                <div className="px-6 py-6 border-b border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-white/[0.01]">
-                  <div className="flex flex-col lg:flex-row items-center justify-between gap-6 mb-4">
-                    <div className="flex flex-col gap-1 w-full lg:w-auto">
+                <div className="px-6 py-6 border-b border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-white/[0.01] flex flex-col gap-4">
+                  <div className="flex flex-col xl:flex-row items-center justify-between gap-6">
+                    <div className="flex flex-col gap-1 w-full xl:w-auto">
                       <h3 className="text-sm font-bold flex items-center gap-2">
                         <LayoutGrid size={16} /> Asset Monitor 
-                        <span className="text-[10px] text-gray-400 font-normal ml-2 tracking-widest uppercase">{Object.values(groupedLots).flat().length} Results</span>
+                        <span className="text-[10px] text-gray-400 font-normal ml-2 tracking-widest uppercase">{totalResults} Results</span>
                       </h3>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
+                    <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto justify-end">
                       <div className="flex bg-white dark:bg-white/5 p-1 rounded-xl border border-gray-200 dark:border-white/10 shadow-sm">
                         <button 
                           onClick={() => setViewLayout('detailed')}
@@ -1013,6 +1048,50 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Filters Bar */}
+                  <div className="flex flex-col lg:flex-row gap-4 items-center">
+                      <div className="relative flex-1 w-full lg:max-w-sm">
+                          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                          <input 
+                            type="text" 
+                            placeholder="Filter by name..." 
+                            value={filterName}
+                            onChange={e => setFilterName(e.target.value)}
+                            className="w-full bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 focus:border-black dark:focus:border-white rounded-xl py-2.5 pl-9 pr-4 text-xs font-bold outline-none transition-all shadow-sm"
+                          />
+                          {isSearching && (
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                              <RefreshCw size={12} className="animate-spin text-blue-500" />
+                            </div>
+                          )}
+                      </div>
+                      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 w-full lg:w-auto">
+                          <Zap size={14} className="text-gray-400 shrink-0 hidden sm:block mx-1" />
+                          {(['All', 'OnSale', 'OffSale'] as const).map(s => (
+                              <button
+                                  key={s}
+                                  onClick={() => setFilterSaleStatus(s)}
+                                  className={`px-3.5 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition-all border ${filterSaleStatus === s ? 'bg-black dark:bg-white text-white dark:text-black border-transparent shadow-md' : 'bg-white dark:bg-white/5 text-gray-500 hover:text-black dark:hover:text-white border-gray-200 dark:border-white/10 shadow-sm'}`}
+                              >
+                                  {s === 'OnSale' ? 'On Sale' : s === 'OffSale' ? 'Off Sale' : 'All Status'}
+                              </button>
+                          ))}
+                      </div>
+                      <div className="hidden sm:block h-6 w-px bg-gray-200 dark:bg-white/10 mx-2" />
+                      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 w-full lg:w-auto">
+                          <LayoutGrid size={14} className="text-gray-400 shrink-0 hidden sm:block mx-1" />
+                          {availableGroups.map(g => (
+                              <button
+                                  key={g}
+                                  onClick={() => setFilterGroup(g)}
+                                  className={`px-3.5 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition-all border ${filterGroup === g ? 'bg-black dark:bg-white text-white dark:text-black border-transparent shadow-md' : 'bg-white dark:bg-white/5 text-gray-500 hover:text-black dark:hover:text-white border-gray-200 dark:border-white/10 shadow-sm'}`}
+                              >
+                                  {g}
+                              </button>
+                          ))}
+                      </div>
+                  </div>
                 </div>
 
                 {/* Views */}
@@ -1057,17 +1136,15 @@ export default function App() {
                                         
                                         <div onClick={(e) => e.stopPropagation()}>
                                             {(editingId === lot.id && editingField === 'name') ? (
-                                                <input 
-                                                    autoFocus
-                                                    value={editValue}
-                                                    onChange={e => setEditValue(e.target.value)}
-                                                    onBlur={saveEdit}
-                                                    onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                                <InlineEdit 
+                                                    value={lot.name}
+                                                    onSave={(val) => saveEditValue(lot.id, 'name', val)}
+                                                    onCancel={cancelEditing}
                                                     className="w-full bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1.5 py-0.5 text-[11px] font-bold outline-none"
                                                 />
                                             ) : (
                                                 <h4 
-                                                    onClick={() => startEditing(lot.id, 'name', lot.name)}
+                                                    onClick={() => startEditing(lot.id, 'name')}
                                                     className="text-[11px] font-black text-gray-900 dark:text-gray-100 uppercase tracking-tighter truncate leading-tight mb-1 cursor-text hover:text-blue-500 transition-colors"
                                                 >
                                                     {lot.name}
@@ -1078,18 +1155,16 @@ export default function App() {
 
                                         <div className="flex items-center justify-between mt-auto pt-3 border-t border-gray-100 dark:border-white/5">
                                             <div 
-                                                onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'price', lot.price); }}
+                                                onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'price'); }}
                                                 className="flex items-center gap-1 cursor-pointer hover:text-blue-500 transition-colors"
                                             >
                                                 <Hexagon size={10} className="text-gray-400 fill-current opacity-50" />
                                                 {editingId === lot.id && editingField === 'price' ? (
-                                                    <input 
-                                                        autoFocus
+                                                    <InlineEdit 
                                                         type="number"
-                                                        value={editValue}
-                                                        onChange={e => setEditValue(e.target.value)}
-                                                        onBlur={saveEdit}
-                                                        onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                                        value={lot.price}
+                                                        onSave={(val) => saveEditValue(lot.id, 'price', val)}
+                                                        onCancel={cancelEditing}
                                                         className="w-16 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-xs font-mono font-bold outline-none"
                                                     />
                                                 ) : (
@@ -1141,7 +1216,7 @@ export default function App() {
                                                         </div>
                                                         
                                                         <button 
-                                                            onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'name', lot.name); }}
+                                                            onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'name'); }}
                                                             className="w-full py-2 bg-gray-100 dark:bg-white/5 rounded-xl text-[9px] font-bold text-gray-400 uppercase tracking-widest hover:bg-gray-200 dark:hover:bg-white/10 hover:text-black dark:hover:text-white transition-all"
                                                         >
                                                             Rename Asset
@@ -1178,17 +1253,15 @@ export default function App() {
                                             <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${lot.isForSale ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-gray-400'}`} />
                                             <div className="flex flex-col min-w-0">
                                                 {editingId === lot.id && editingField === 'name' ? (
-                                                    <input 
-                                                        autoFocus
-                                                        value={editValue}
-                                                        onChange={e => setEditValue(e.target.value)}
-                                                        onBlur={saveEdit}
-                                                        onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                                    <InlineEdit 
+                                                        value={lot.name}
+                                                        onSave={(val) => saveEditValue(lot.id, 'name', val)}
+                                                        onCancel={cancelEditing}
                                                         className="bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-xs font-bold outline-none"
                                                     />
                                                 ) : (
                                                     <div 
-                                                        onClick={() => startEditing(lot.id, 'name', lot.name)}
+                                                        onClick={() => startEditing(lot.id, 'name')}
                                                         className="text-xs font-bold truncate text-gray-900 dark:text-gray-100 cursor-text hover:text-blue-500"
                                                     >
                                                         {lot.name}
@@ -1199,18 +1272,16 @@ export default function App() {
                                         </div>
                                         <div className="flex items-center gap-4">
                                             {editingId === lot.id && editingField === 'price' ? (
-                                                <input 
-                                                    autoFocus
+                                                <InlineEdit 
                                                     type="number"
-                                                    value={editValue}
-                                                    onChange={e => setEditValue(e.target.value)}
-                                                    onBlur={saveEdit}
-                                                    onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                                    value={lot.price}
+                                                    onSave={(val) => saveEditValue(lot.id, 'price', val)}
+                                                    onCancel={cancelEditing}
                                                     className="w-16 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-xs font-mono font-bold outline-none"
                                                 />
                                             ) : (
                                                 <div 
-                                                    onClick={() => startEditing(lot.id, 'price', lot.price)}
+                                                    onClick={() => startEditing(lot.id, 'price')}
                                                     className="font-mono text-xs font-bold text-gray-900 dark:text-gray-100 pr-4 cursor-text hover:text-blue-500"
                                                 >
                                                     {lot.price} R$
@@ -1227,17 +1298,15 @@ export default function App() {
                                         <div className="flex justify-between items-start">
                                           <div className="flex-1 mr-4">
                                             {editingId === lot.id && editingField === 'name' ? (
-                                              <input 
-                                                autoFocus
-                                                value={editValue}
-                                                onChange={e => setEditValue(e.target.value)}
-                                                onBlur={saveEdit}
-                                                onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                              <InlineEdit 
+                                                value={lot.name}
+                                                onSave={(val) => saveEditValue(lot.id, 'name', val)}
+                                                onCancel={cancelEditing}
                                                 className="w-full bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-2 py-1 text-sm font-bold outline-none"
                                               />
                                             ) : (
                                               <div 
-                                                onClick={() => startEditing(lot.id, 'name', lot.name)}
+                                                onClick={() => startEditing(lot.id, 'name')}
                                                 className="font-bold text-sm text-gray-900 dark:text-gray-100 cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded -ml-1 transition-colors flex items-center gap-1.5 group/name"
                                               >
                                                 {lot.name}
@@ -1256,17 +1325,15 @@ export default function App() {
                                               </div>
                                               
                                               {editingId === lot.id && editingField === 'group' ? (
-                                                <input 
-                                                  autoFocus
-                                                  value={editValue}
-                                                  onChange={e => setEditValue(e.target.value)}
-                                                  onBlur={saveEdit}
-                                                  onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                                <InlineEdit 
+                                                  value={lot.baseName || 'Inventory'}
+                                                  onSave={(val) => saveEditValue(lot.id, 'group', val)}
+                                                  onCancel={cancelEditing}
                                                   className="w-full bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-2 py-0.5 text-[10px] font-bold outline-none mt-1"
                                                 />
                                               ) : (
                                                 <div 
-                                                  onClick={() => startEditing(lot.id, 'group', lot.baseName || 'Inventory')}
+                                                  onClick={() => startEditing(lot.id, 'group')}
                                                   className="text-[10px] text-gray-400 uppercase tracking-widest font-bold cursor-text hover:text-black dark:hover:text-white transition-colors flex items-center gap-1.5 group/group"
                                                 >
                                                   Group: {lot.baseName || 'Inventory'}
@@ -1290,20 +1357,18 @@ export default function App() {
                                         <div className="flex items-center justify-between bg-gray-50 dark:bg-white/5 p-3 rounded-2xl border border-gray-100 dark:border-white/5">
                                           <div className="space-y-1">
                                             <div className="text-[8px] uppercase font-bold text-gray-400 tracking-widest">Market Price</div>
-                                            <div className={`font-mono text-sm font-bold flex items-center gap-1.5 ${lot.price != Number(globalPrice) ? 'text-orange-500' : 'text-gray-900 dark:text-gray-100'}`}>
+                                            <div className={`font-mono text-sm font-bold flex items-center gap-1.5 ${lot.price != Number(deferredGlobalPrice) ? 'text-orange-500' : 'text-gray-900 dark:text-gray-100'}`}>
                                               <Hexagon size={12} className="opacity-50 fill-current" />
                                               {editingId === lot.id && editingField === 'price' ? (
-                                                <input 
-                                                  autoFocus
+                                                <InlineEdit 
                                                   type="number"
-                                                  value={editValue}
-                                                  onChange={e => setEditValue(e.target.value)}
-                                                  onBlur={saveEdit}
-                                                  onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                                  value={lot.price}
+                                                  onSave={(val) => saveEditValue(lot.id, 'price', val)}
+                                                  onCancel={cancelEditing}
                                                   className="w-20 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 outline-none"
                                                 />
                                               ) : (
-                                                <span onClick={() => startEditing(lot.id, 'price', lot.price)} className="cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded transition-colors">
+                                                <span onClick={() => startEditing(lot.id, 'price')} className="cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded transition-colors">
                                                   {lot.price.toLocaleString()}
                                                 </span>
                                               )}
@@ -1311,7 +1376,7 @@ export default function App() {
                                           </div>
                                           <div className="flex gap-2">
                                             <button 
-                                              onClick={() => startEditing(lot.id, 'group', lot.baseName || 'Inventory')}
+                                              onClick={() => startEditing(lot.id, 'group')}
                                               className="p-3 bg-gray-100 dark:bg-white/5 text-gray-400 rounded-xl active:scale-95 transition-all"
                                               title="Change Group"
                                             >
@@ -1396,17 +1461,15 @@ export default function App() {
                                     <div className="flex items-center gap-4">
                                       <div className="flex-1">
                                         {editingId === lot.id && editingField === 'name' ? (
-                                            <input 
-                                              autoFocus
-                                              value={editValue}
-                                              onChange={e => setEditValue(e.target.value)}
-                                              onBlur={saveEdit}
-                                              onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                            <InlineEdit 
+                                              value={lot.name}
+                                              onSave={(val) => saveEditValue(lot.id, 'name', val)}
+                                              onCancel={cancelEditing}
                                               className="w-full bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-2 py-0.5 text-sm font-bold outline-none"
                                             />
                                         ) : (
                                             <div 
-                                              onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'name', lot.name); }}
+                                              onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'name'); }}
                                               className={`font-bold tracking-tight text-gray-900 dark:text-gray-100 cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded -ml-1 transition-colors flex items-center gap-1.5 group/name ${viewLayout === 'compact' ? 'text-xs' : 'text-sm'}`}
                                             >
                                               {lot.name}
@@ -1416,17 +1479,15 @@ export default function App() {
                                         {viewLayout === 'detailed' && (
                                             <div className="flex items-center gap-1.5 mt-0.5">
                                               {editingId === lot.id && editingField === 'group' ? (
-                                                <input 
-                                                  autoFocus
-                                                  value={editValue}
-                                                  onChange={e => setEditValue(e.target.value)}
-                                                  onBlur={saveEdit}
-                                                  onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                                <InlineEdit 
+                                                  value={lot.baseName || 'Inventory'}
+                                                  onSave={(val) => saveEditValue(lot.id, 'group', val)}
+                                                  onCancel={cancelEditing}
                                                   className="w-32 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-[10px] font-bold outline-none"
                                                 />
                                               ) : (
                                                 <div 
-                                                  onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'group', lot.baseName || 'Inventory'); }}
+                                                  onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'group'); }}
                                                   className="text-[10px] text-gray-400 uppercase tracking-[0.2em] font-bold cursor-text hover:text-black dark:hover:text-white transition-colors flex items-center gap-1.5 group/group"
                                                 >
                                                   {lot.baseName || 'Inventory'}
@@ -1442,28 +1503,26 @@ export default function App() {
                                     </div>
                                   </td>
                                   <td className={`px-6 ${viewLayout === 'compact' ? 'py-2' : 'py-4'} text-right`}>
-                                    <div className={`font-mono font-bold flex items-center justify-end gap-1.5 ${viewLayout === 'compact' ? 'text-xs' : 'text-sm'} ${lot.price != Number(globalPrice) ? 'text-orange-500 underline decoration-dotted decoration-orange-500/50' : 'text-gray-900 dark:text-gray-100'}`}>
+                                    <div className={`font-mono font-bold flex items-center justify-end gap-1.5 ${viewLayout === 'compact' ? 'text-xs' : 'text-sm'} ${lot.price != Number(deferredGlobalPrice) ? 'text-orange-500 underline decoration-dotted decoration-orange-500/50' : 'text-gray-900 dark:text-gray-100'}`}>
                                       <Hexagon size={12} className="opacity-50 fill-current" />
                                       {editingId === lot.id && editingField === 'price' ? (
-                                        <input 
-                                          autoFocus
+                                        <InlineEdit 
                                           type="number"
-                                          value={editValue}
-                                          onChange={e => setEditValue(e.target.value)}
-                                          onBlur={saveEdit}
-                                          onKeyDown={e => e.key === 'Enter' && saveEdit() || e.key === 'Escape' && cancelEditing()}
+                                          value={lot.price}
+                                          onSave={(val) => saveEditValue(lot.id, 'price', val)}
+                                          onCancel={cancelEditing}
                                           className="w-20 bg-gray-100 dark:bg-white/10 border border-black dark:border-white rounded px-1 text-right outline-none"
                                         />
                                       ) : (
                                         <span 
-                                          onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'price', lot.price); }}
+                                          onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'price'); }}
                                           className="cursor-text hover:bg-gray-100 dark:hover:bg-white/10 px-1 rounded transition-colors"
                                         >
                                           {lot.price.toLocaleString()}
                                         </span>
                                       )}
                                     </div>
-                                    {lot.price != Number(globalPrice) && viewLayout === 'detailed' && (
+                                    {lot.price != Number(deferredGlobalPrice) && viewLayout === 'detailed' && (
                                         <div className="text-[8px] font-bold text-orange-400 uppercase tracking-tighter mt-0.5">Price Mismatch</div>
                                     )}
                                   </td>
@@ -1478,7 +1537,7 @@ export default function App() {
                                   <td className={`px-6 ${viewLayout === 'compact' ? 'py-2' : 'py-4'} text-right`}>
                                     <div className="flex items-center justify-end gap-1.5 opacity-40 group-hover:opacity-100 transition-opacity">
                                       <button 
-                                        onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'group', lot.baseName || 'Inventory'); }}
+                                        onClick={(e) => { e.stopPropagation(); startEditing(lot.id, 'group'); }}
                                         className="p-2.5 hover:bg-gray-100 dark:hover:bg-white/5 text-gray-400 hover:text-black dark:hover:text-white rounded-xl transition-all"
                                         title="Change Group"
                                       >

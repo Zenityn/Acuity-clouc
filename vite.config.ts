@@ -21,6 +21,12 @@ export default defineConfig(({mode}) => {
         '/roblox-api': {
           target: 'https://apis.roblox.com',
           changeOrigin: true,
+          secure: false,
+          timeout: 60000,
+          proxyTimeout: 60000,
+          headers: {
+            Connection: 'keep-alive'
+          },
           rewrite: (path) => path.replace(/^\/roblox-api/, '')
         }
       }
