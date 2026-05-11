@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // User Profiles & Config
+    match /users/{userId} {
+      // Allow user to check their own profile if needed (though not used yet)
+      allow read: if isOwner(userId);
+
+      match /config/roblox {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidConfig(incoming());
+        
+        function isValidConfig(data) {
+          return data.keys().hasAll(['apiKey', 'universeId', 'theme'])
+            && data.apiKey is string && data.apiKey.size() <= 1000
+            && data.universeId is string && data.universeId.size() <= 128
+            && data.theme is string && data.theme in ['light', 'dark', 'almond', 'system']
+            && (data.keys().hasAll(['updatedAt']) ? data.updatedAt is string : true);
+        }
+      }
+
+      match /lots/{lotId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidLot(incoming()) && isValidId(lotId);
+        allow update: if isOwner(userId) && isValidLot(incoming()) && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'baseName', 'price', 'isForSale', 'updatedAt', 'num'])
+        );
+        allow delete: if isOwner(userId);
+
+        function isValidLot(data) {
+          return data.keys().hasAll(['id', 'universeId', 'name', 'price', 'isForSale'])
+            && data.id is string && data.id.size() <= 128
+            && data.universeId is string && data.universeId.size() <= 128
+            && data.name is string && data.name.size() <= 1000
+            && data.price is number
+            && data.isForSale is bool
+            && (data.keys().hasAll(['num']) ? data.num is number : true)
+            && (data.keys().hasAll(['updatedAt']) ? data.updatedAt is string : true)
+            && (data.keys().hasAll(['baseName']) ? data.baseName is string : true);
+        }
+      }
+    }
+  }
+}

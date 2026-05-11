@@ -106,24 +106,42 @@ async function startServer() {
       const url = `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes`;
       
       const form = new FormData();
+      // Match the Python snippet's field names exactly
       form.append("name", name);
       form.append("description", description || "Created via BloxEx Cloud Manager");
       form.append("price", String(price || 0));
       form.append("isForSale", String(isForSale === 'true' || isForSale === true));
+      
+      // The imageFile must be appended last or with proper headers
       form.append("imageFile", file.buffer, {
-        filename: file.originalname,
-        contentType: file.mimetype,
+        filename: file.originalname || 'icon.jpg',
+        contentType: file.mimetype || 'image/jpeg',
       });
 
+      console.log(`[Gamepass Creation] Calling Roblox API: ${url}`);
+      
       const r = await fetch(url, {
         method: "POST",
-        headers: { ...getHeaders(apiKey), ...form.getHeaders() },
+        headers: { 
+          ...getHeaders(apiKey), 
+          ...form.getHeaders() 
+        },
         body: form
       });
 
-      const data: any = await r.json();
+      const responseText = await r.text();
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        data = { message: responseText };
+      }
+
       if (!r.ok) {
-        throw new Error(data.message || `Roblox Error ${r.status}`);
+        console.error("Roblox API Error:", responseText);
+        // Extract a better error message if possible
+        const errorMessage = data.message || (data.errors && data.errors[0]?.message) || `Roblox Error ${r.status}`;
+        throw new Error(errorMessage);
       }
 
       // Track the new gamepass
@@ -247,6 +265,42 @@ async function startServer() {
 
     const all = loadLots();
     const updated = all.map(l => (l.universeId === universeId) ? { ...l, price, isForSale: true } : l);
+    saveLots(updated);
+
+    res.json({ status: "success", count: success });
+  });
+
+  // BULK SHUTDOWN
+  app.post("/bulk_shutdown", async (req, res) => {
+    const { universeId, apiKey, ids } = req.body;
+    if (!universeId || !apiKey || !ids || !Array.isArray(ids)) {
+      return res.status(400).json({ error: "Missing required information" });
+    }
+
+    let success = 0;
+    for (const id of ids) {
+      try {
+        const url = `https://apis.roblox.com/game-passes/v1/universes/${universeId}/game-passes/${id}`;
+        const form = new FormData();
+        form.append("isForSale", "false");
+
+        const r = await fetch(url, {
+          method: "PATCH",
+          headers: { ...getHeaders(apiKey), ...form.getHeaders() },
+          body: form
+        });
+
+        if (r.ok) success++;
+        // Small delay to avoid rate limits
+        await new Promise(r => setTimeout(r, 150));
+      } catch (e) {
+        console.error(`Shutdown failed for ${id}:`, e);
+      }
+    }
+
+    const all = loadLots();
+    const idSet = new Set(ids);
+    const updated = all.map(l => idSet.has(l.id) ? { ...l, isForSale: false } : l);
     saveLots(updated);
 
     res.json({ status: "success", count: success });

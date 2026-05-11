@@ -1,0 +1,40 @@
+{
+  "entities": {
+    "UserConfig": {
+      "title": "User Configuration",
+      "description": "User specific settings for Roblox API and UI theme",
+      "type": "object",
+      "properties": {
+        "apiKey": { "type": "string", "description": "Roblox Cloud API Key" },
+        "universeId": { "type": "string", "description": "Roblox Universe ID" },
+        "theme": { "type": "string", "description": "UI Theme preference", "enum": ["light", "dark", "almond", "system"] }
+      }
+    },
+    "AssetLot": {
+      "title": "Asset Lot",
+      "description": "A tracked Roblox Gamepass/Asset",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Roblox Asset ID" },
+        "baseName": { "type": "string", "description": "The custom group name" },
+        "num": { "type": "number", "description": "Sort order index" },
+        "universeId": { "type": "string", "description": "Universe ID it belongs to" },
+        "name": { "type": "string", "description": "Asset name" },
+        "price": { "type": "number", "description": "Asset price in Robux" },
+        "isForSale": { "type": "boolean", "description": "On-sale status" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "universeId", "name", "price", "isForSale"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/config/roblox": {
+      "schema": "UserConfig",
+      "description": "User settings for Roblox integration"
+    },
+    "/users/{userId}/lots/{lotId}": {
+      "schema": "AssetLot",
+      "description": "The list of tracked assets for a user"
+    }
+  }
+}
