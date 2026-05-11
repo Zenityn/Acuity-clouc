@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/roblox/:path*",
+      "destination": "https://apis.roblox.com/:path*"
+    },
+    {
+      "source": "/roblox-api/:path*",
+      "destination": "https://apis.roblox.com/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

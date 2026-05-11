@@ -226,19 +226,14 @@ export default function App() {
   }, [apiKey, universeId]);
 
   const fetchLots = async () => {
-    try {
-      const r = await fetch('/get_ids');
-      const data = await r.json();
-      const serverLots = data.lots || [];
-      if (!user) {
-        setLots(serverLots);
-      } else {
-        // If logged in, we sync server data to Firestore
-        // The onSnapshot listener will update the local state
-        await saveLotsToFirestore(serverLots);
+    // Rely on Firestore when logged in
+    if (!user) {
+      try {
+        const local = JSON.parse(localStorage.getItem('local_lots') || '[]');
+        setLots(local);
+      } catch (e) {
+        setLots([]);
       }
-    } catch (e) {
-      console.error("Failed to fetch lots", e);
     }
   };
 
@@ -246,16 +241,25 @@ export default function App() {
     if (!apiKey || !universeId) return notify("Set API Key & Universe ID in Settings first", "err");
     setIsLoading(true);
     try {
-      const r = await fetch('/check_prices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey, universeId })
-      });
-      const data = await r.json();
-      if (data.status === 'success') {
-        notify(`Audit complete for Univ ${universeId}: ${data.audited} assets checked`, 'ok');
+      const results = [];
+      const universeLots = lots.filter(l => l.universeId === universeId);
+      for (const lot of universeLots) {
+        const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes/${lot.id}/creator`;
+        const r = await fetch(url, { headers: { 'x-api-key': apiKey } });
+        if (r.ok) {
+          const data = await r.json();
+          lot.price = data.priceInformation?.defaultPriceInRobux || 0;
+          lot.isForSale = !!data.priceInformation?.defaultPriceInRobux;
+          results.push(lot);
+        }
+        await new Promise(res => setTimeout(res, 100)); // rate limit
       }
-      await fetchLots();
+      
+      notify(`Audit complete for Univ ${universeId}: ${results.length} assets checked`, 'ok');
+      setLots([...lots]);
+      if (user) await saveLotsToFirestore(universeLots);
+      else localStorage.setItem('local_lots', JSON.stringify(lots));
+
     } catch (e) {
       notify("Audit failed", "err");
     } finally {
@@ -267,17 +271,37 @@ export default function App() {
     if (!apiKey || !universeId) return notify("Set credentials in Settings", "err");
     setIsLoading(true);
     try {
-      const r = await fetch('/import_existing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey, universeId, filterName })
-      });
-      const d = await r.json();
-      if (d.status === 'success') {
-        notify(`Import scan complete for Univ ${universeId}. Found ${d.count} new assets.`, 'ok');
-        await fetchLots();
+      const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes/creator`;
+      const r = await fetch(url, { headers: { 'x-api-key': apiKey } });
+      const data = await r.json();
+      
+      if (r.ok) {
+        const allPasses = data.gamePasses || [];
+        const matched = filterName 
+          ? allPasses.filter((p: any) => p.name.toLowerCase().includes(filterName.toLowerCase()))
+          : allPasses;
+          
+        const existingIds = new Set(lots.map(l => l.id));
+        const newLots = matched
+          .filter((p: any) => !existingIds.has(String(p.gamePassId)))
+          .map((p: any, i: number) => ({
+            id: String(p.gamePassId),
+            baseName: "Imported",
+            num: lots.length + i + 1,
+            universeId: universeId,
+            name: p.name,
+            price: p.priceInformation?.defaultPriceInRobux || 0,
+            isForSale: !!p.priceInformation?.defaultPriceInRobux
+          }));
+          
+        const updated = [...lots, ...newLots];
+        setLots(updated);
+        if (user) await saveLotsToFirestore(updated);
+        else localStorage.setItem('local_lots', JSON.stringify(updated));
+
+        notify(`Import scan complete for Univ ${universeId}. Found ${newLots.length} new assets.`, 'ok');
       } else {
-        notify(d.message || "Import failed", "err");
+        notify(data.message || "Import failed", "err");
       }
     } catch (e) {
       notify("Network error during import", "err");
@@ -303,8 +327,10 @@ export default function App() {
       fd.append('apiKey', apiKey);
       fd.append('baseName', 'Inventory');
 
-      const r = await fetch('/api/create_gamepass', {
+      const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes`;
+      const r = await fetch(url, {
         method: 'POST',
+        headers: { 'x-api-key': apiKey },
         body: fd
       });
       
@@ -316,12 +342,25 @@ export default function App() {
         d = { message: responseText };
       }
       
-      if (r.ok && d.status === 'success') {
+      if (r.ok) {
+        const newLot: Lot = {
+          id: String(d.gamePassId),
+          baseName: 'Inventory',
+          num: lots.length + 1,
+          universeId: universeId,
+          name: newName || "Stock Share #1",
+          price: Number(newPrice || 0),
+          isForSale: newIsForSale
+        };
+        const updated = [...lots, newLot];
+        setLots(updated);
+        if (user) await saveLotsToFirestore([newLot]); // Only save new one, rest are in sync
+        else localStorage.setItem('local_lots', JSON.stringify(updated));
+
         notify(`Gamepass created in Univ ${universeId}!`, "ok");
         setNewName('');
         setNewDesc('');
         setNewIcon(null);
-        await fetchLots();
         setTab('live');
       } else {
         const errorMsg = d.message || d.error || "Creation failed";
@@ -341,14 +380,33 @@ export default function App() {
     if (!confirm(`Sync ALL tracked assets for Universe ${universeId} to ${globalPrice} Robux?`)) return;
     setIsLoading(true);
     try {
-      const r = await fetch('/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey, universeId, price: Number(globalPrice) })
-      });
-      const d = await r.json();
-      notify(`Synced ${d.count} assets in Univ ${universeId} to ${globalPrice} R$`, 'ok');
-      await fetchLots();
+      let success = 0;
+      const universeLots = lots.filter(l => l.universeId === universeId);
+      
+      for (const lot of universeLots) {
+        const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes/${lot.id}`;
+        const fd = new FormData();
+        fd.append("price", String(globalPrice));
+        fd.append("isForSale", "true");
+
+        const r = await fetch(url, {
+          method: "PATCH",
+          headers: { 'x-api-key': apiKey },
+          body: fd
+        });
+
+        if (r.ok) success++;
+        await new Promise(res => setTimeout(res, 200));
+      }
+
+      const updated = lots.map(l => (l.universeId === universeId) ? { ...l, price: Number(globalPrice), isForSale: true } : l);
+      setLots(updated);
+      
+      const changedLots = updated.filter(l => l.universeId === universeId);
+      if (user) await saveLotsToFirestore(changedLots);
+      else localStorage.setItem('local_lots', JSON.stringify(updated));
+
+      notify(`Synced ${success} assets in Univ ${universeId} to ${globalPrice} R$`, 'ok');
     } finally {
       setIsLoading(false);
     }
@@ -359,24 +417,28 @@ export default function App() {
     const targetUniverseId = asset?.universeId || universeId;
 
     try {
-      const r = await fetch('/update_asset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            id, 
-            universeId: targetUniverseId, 
-            apiKey, 
-            name: updates.name,
-            baseName: updates.baseName,
-            price: updates.price,
-            forSale: updates.isForSale 
-        })
+      const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes/${id}`;
+      const fd = new FormData();
+      if (updates.name !== undefined) fd.append("name", String(updates.name));
+      if (updates.baseName !== undefined) fd.append("description", `[Group: ${updates.baseName}]`);
+      if (updates.price !== undefined) fd.append("price", String(updates.price));
+      if (updates.isForSale !== undefined) fd.append("isForSale", String(updates.isForSale));
+
+      const r = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'x-api-key': apiKey },
+        body: fd
       });
-      const d = await r.json();
-      if (d.status === 'success') {
+      
+      if (r.ok) {
         notify("Update successful", "ok");
-        await fetchLots();
+        const updatedLots = lots.map(l => l.id === id ? { ...l, ...updates } : l);
+        setLots(updatedLots);
+        const changedUser = updatedLots.find(l => l.id === id);
+        if (user && changedUser) await saveLotsToFirestore([changedUser]);
+        else localStorage.setItem('local_lots', JSON.stringify(updatedLots));
       } else {
+        const d = await r.json().catch(() => ({}));
         notify(d.message || "Update failed", "err");
       }
     } catch (e) {
@@ -420,22 +482,31 @@ export default function App() {
     
     setIsLoading(true);
     try {
-      const r = await fetch('/bulk_shutdown', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          apiKey, 
-          universeId, 
-          ids: matchedIds 
-        })
-      });
-      const d = await r.json();
-      if (d.status === 'success') {
-        notify(`Shutdown complete: ${d.count} assets set off-sale`, 'ok');
-      } else {
-        notify(d.message || "Shutdown failed", "err");
+      let success = 0;
+      for (const id of matchedIds) {
+        const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes/${id}`;
+        const fd = new FormData();
+        fd.append("isForSale", "false");
+
+        const r = await fetch(url, {
+          method: "PATCH",
+          headers: { 'x-api-key': apiKey },
+          body: fd
+        });
+
+        if (r.ok) success++;
+        await new Promise(res => setTimeout(res, 150));
       }
-      await fetchLots();
+      
+      const idSet = new Set(matchedIds);
+      const updated = lots.map(l => idSet.has(l.id) ? { ...l, isForSale: false } : l);
+      setLots(updated);
+      
+      const changedLots = updated.filter(l => idSet.has(l.id));
+      if (user) await saveLotsToFirestore(changedLots);
+      else localStorage.setItem('local_lots', JSON.stringify(updated));
+
+      notify(`Shutdown complete: ${success} assets set off-sale`, 'ok');
     } catch (e) {
       notify("Network error during shutdown", "err");
     } finally {
