@@ -82,6 +82,8 @@ export default function App() {
   const [newPrice, setNewPrice] = useState('100');
   const [newIsForSale, setNewIsForSale] = useState(true);
   const [newIcon, setNewIcon] = useState<File | null>(null);
+  const [bulkCount, setBulkCount] = useState(1);
+  const [lastImported, setLastImported] = useState<number>(0);
   const [showApiKeyGuide, setShowApiKeyGuide] = useState(false);
   const [showUniverseIdGuide, setShowUniverseIdGuide] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark' | 'almond' | 'system'>(() => (localStorage.getItem('theme') as 'light' | 'dark' | 'almond' | 'system') || 'system');
@@ -326,6 +328,12 @@ export default function App() {
 
   const importExisting = async () => {
     if (!apiKey || !universeId) return notify("Set credentials in Settings", "err");
+    
+    // Simple caching: prevent accidental double-clicks or repeated fetches within 3 seconds
+    const now = Date.now();
+    if (now - lastImported < 3000) return;
+    setLastImported(now);
+
     setIsLoading(true);
     try {
       const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes/creator`;
@@ -374,55 +382,76 @@ export default function App() {
     
     setIsLoading(true);
     try {
-      const fd = new FormData();
-      fd.append('name', newName || "Stock Share #1");
-      fd.append('description', newDesc || "Acuity.sys Automated Lot");
-      fd.append('price', newPrice);
-      fd.append('isForSale', String(newIsForSale));
-      fd.append('imageFile', newIcon);
-      fd.append('universeId', universeId);
-      fd.append('apiKey', apiKey);
-      fd.append('baseName', 'Inventory');
+      let createdCount = 0;
+      let lastId = "";
+      const newLotsToSync: Lot[] = [];
 
-      const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes`;
-      const r = await fetch(url, {
-        method: 'POST',
-        headers: { 'x-api-key': apiKey },
-        body: fd
-      });
-      
-      const responseText = await r.text();
-      let d: any;
-      try {
-        d = JSON.parse(responseText);
-      } catch (err) {
-        d = { message: responseText };
+      for (let i = 1; i <= bulkCount; i++) {
+        const currentName = bulkCount > 1 ? `${newName || "Stock Share"} #${i}` : (newName || "Stock Share #1");
+        
+        const fd = new FormData();
+        fd.append('name', currentName);
+        fd.append('description', newDesc || "Acuity.sys Automated Lot");
+        fd.append('price', newPrice);
+        fd.append('isForSale', String(newIsForSale));
+        fd.append('imageFile', newIcon);
+        fd.append('universeId', universeId);
+        fd.append('apiKey', apiKey);
+        fd.append('baseName', 'Inventory');
+
+        const url = `/roblox-api/game-passes/v1/universes/${universeId}/game-passes`;
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'x-api-key': apiKey },
+          body: fd
+        });
+        
+        const responseText = await r.text();
+        let d: any;
+        try {
+          d = JSON.parse(responseText);
+        } catch (err) {
+          d = { message: responseText };
+        }
+        
+        if (r.ok) {
+          const newLot: Lot = {
+            id: String(d.gamePassId),
+            baseName: 'Inventory',
+            num: lots.length + createdCount + 1,
+            universeId: universeId,
+            name: currentName,
+            price: Number(newPrice || 0),
+            isForSale: newIsForSale
+          };
+          newLotsToSync.push(newLot);
+          lastId = String(d.gamePassId);
+          createdCount++;
+          
+          if (bulkCount > 1) {
+            // Small delay between bulk creations to avoid rate limits
+            await new Promise(res => setTimeout(res, 500));
+          }
+        } else {
+          const errorMsg = d.message || d.error || "Creation failed";
+          notify(`ROBLOX Error at #${i}: ${errorMsg}`, "err");
+          break; // Stop bulk creation if one fails
+        }
       }
       
-      if (r.ok) {
-        const newLot: Lot = {
-          id: String(d.gamePassId),
-          baseName: 'Inventory',
-          num: lots.length + 1,
-          universeId: universeId,
-          name: newName || "Stock Share #1",
-          price: Number(newPrice || 0),
-          isForSale: newIsForSale
-        };
-        const updated = [...lots, newLot];
+      if (createdCount > 0) {
+        const updated = [...lots, ...newLotsToSync];
         setLots(updated);
-        if (user) await saveLotsToFirestore([newLot]); // Only save new one, rest are in sync
+        if (user) await saveLotsToFirestore(newLotsToSync);
         else localStorage.setItem('local_lots', JSON.stringify(updated));
 
-        notify(`Gamepass created in Univ ${universeId}!`, "ok");
-        setNewName('');
-        setNewDesc('');
-        setNewIcon(null);
-        setTab('live');
-      } else {
-        const errorMsg = d.message || d.error || "Creation failed";
-        notify(`ROBLOX Error: ${errorMsg}`, "err");
-        console.error("Gamepass creation error:", d);
+        notify(`Success: ${createdCount} assets created in Univ ${universeId}!`, "ok");
+        if (createdCount === 1) {
+           setNewName('');
+           setNewDesc('');
+           setNewIcon(null);
+           setTab('live');
+        }
       }
     } catch (e) {
       notify("Network error during creation", "err");
@@ -1616,6 +1645,18 @@ export default function App() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
+                            <label className="text-[10px] uppercase font-bold tracking-widest text-gray-400">Bulk Count (1-50)</label>
+                            <input 
+                                type="number"
+                                min="1"
+                                max="50"
+                                required
+                                value={bulkCount}
+                                onChange={e => setBulkCount(Math.min(50, Math.max(1, Number(e.target.value))))}
+                                className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl py-3 px-4 outline-none focus:border-black dark:focus:border-white transition-all text-sm font-mono"
+                            />
+                        </div>
+                        <div className="space-y-2">
                             <label className="text-[10px] uppercase font-bold tracking-widest text-gray-400">Initial Price (R$)</label>
                             <input 
                                 type="number"
@@ -1625,16 +1666,17 @@ export default function App() {
                                 className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-2xl py-3 px-4 outline-none focus:border-black dark:focus:border-white transition-all text-sm font-mono"
                             />
                         </div>
-                        <div className="space-y-2">
-                            <label className="text-[10px] uppercase font-bold tracking-widest text-gray-400">Asset Icon (JPEG/PNG)</label>
-                            <input 
-                                type="file"
-                                accept="image/*"
-                                required
-                                onChange={e => setNewIcon(e.target.files?.[0] || null)}
-                                className="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-[10px] file:font-black file:uppercase file:bg-black dark:file:bg-white file:text-white dark:file:text-black hover:file:opacity-80"
-                            />
-                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[10px] uppercase font-bold tracking-widest text-gray-400">Asset Icon (JPEG/PNG)</label>
+                        <input 
+                            type="file"
+                            accept="image/*"
+                            required
+                            onChange={e => setNewIcon(e.target.files?.[0] || null)}
+                            className="w-full text-xs text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-[10px] file:font-black file:uppercase file:bg-black dark:file:bg-white file:text-white dark:file:text-black hover:file:opacity-80"
+                        />
                     </div>
 
                     <div className="flex items-end pb-1">
