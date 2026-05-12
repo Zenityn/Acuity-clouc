@@ -479,13 +479,16 @@ export default function App() {
         const r = await fetch(url, {
           method: "PATCH",
           headers: { 
-            'x-api-key': apiKey,
-            'Connection': 'close'
+            'x-api-key': apiKey
           },
           body: fd
         });
 
         if (r.ok) success++;
+        else {
+          const d = await r.json().catch(() => ({}));
+          console.error("Bulk sync error for lot", lot.id, d);
+        }
         await new Promise(res => setTimeout(res, 1000));
       }
 
@@ -509,16 +512,25 @@ export default function App() {
     try {
       const url = `/roblox-api/game-passes/v1/universes/${targetUniverseId}/game-passes/${id}`;
       const fd = new FormData();
+      
       if (updates.name !== undefined) fd.append("name", String(updates.name));
       if (updates.baseName !== undefined) fd.append("description", `[Group: ${updates.baseName}]`);
-      if (updates.price !== undefined) fd.append("price", String(updates.price));
+      
+      // Roblox PATCH often requires price when setting isForSale to true
+      const finalIsForSale = updates.isForSale !== undefined ? updates.isForSale : asset?.isForSale;
+      if (finalIsForSale) {
+        const p = updates.price !== undefined ? updates.price : (asset?.price || 0);
+        fd.append("price", String(p));
+      } else if (updates.price !== undefined) {
+        fd.append("price", String(updates.price));
+      }
+      
       if (updates.isForSale !== undefined) fd.append("isForSale", String(updates.isForSale));
 
       const r = await fetch(url, {
         method: 'PATCH',
         headers: { 
-          'x-api-key': apiKey,
-          'Connection': 'close'
+          'x-api-key': apiKey
         },
         body: fd
       });
@@ -532,7 +544,8 @@ export default function App() {
         else localStorage.setItem('local_lots', JSON.stringify(updatedLots));
       } else {
         const d = await r.json().catch(() => ({}));
-        notify(d.message || d.error || d.errorMessage || "Update failed", "err");
+        const errMsg = d.message || d.error || d.errorMessage || (d.errors?.[0]?.message) || "Update failed";
+        notify(errMsg, "err");
       }
     } catch (e) {
       notify("Network error during update", "err");
@@ -581,13 +594,16 @@ export default function App() {
         const r = await fetch(url, {
           method: "PATCH",
           headers: { 
-            'x-api-key': apiKey,
-            'Connection': 'close'
+            'x-api-key': apiKey
           },
           body: fd
         });
 
         if (r.ok) success++;
+        else {
+           const d = await r.json().catch(() => ({}));
+           console.error("Emergency shutdown error for id", id, d);
+        }
         await new Promise(res => setTimeout(res, 800));
       }
       
